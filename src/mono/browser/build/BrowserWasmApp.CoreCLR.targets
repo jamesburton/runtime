@@ -1,9 +1,55 @@
 <Project>
-  <!-- TODO-WASM: These targets are invoked by public WasmSDK -->
-  <Target Name="WasmBuildApp">
-    <Message Importance="high" Text="WasmBuildApp for CoreCLR not implemented" />
+  <!--
+    CoreCLR browser-wasm app build targets.
+
+    Unlike Mono, CoreCLR pre-links dotnet.native.wasm once during the runtime build (via corehost.proj).
+    The pre-built native files (dotnet.native.wasm, dotnet.native.js, etc.) are already in the runtime pack.
+    This targets file imports the shared WasmApp.Common.targets infrastructure but skips per-app emcc
+    compile/link by setting WasmBuildNative=false and marking the Emscripten toolchain as unavailable.
+  -->
+
+  <Import Project="$(WasmCommonTargetsPath)WasmApp.Common.targets" />
+
+  <ItemGroup>
+    <!-- Allow running/debugging from VS -->
+    <ProjectCapability Include="DotNetCoreWeb" />
+  </ItemGroup>
+
+  <!--
+    Override _SetupToolchain to mark the Emscripten toolchain as missing.
+    CoreCLR does not need emcc for app builds since native linking is done at runtime build time.
+    This skips _ReadWasmProps (which reads wasm-props.json from a src/ dir that doesn't exist for CoreCLR)
+    and all emcc-related targets.
+  -->
+  <Target Name="_SetupToolchain">
+    <PropertyGroup>
+      <_IsToolchainMissing>true</_IsToolchainMissing>
+    </PropertyGroup>
   </Target>
-  <Target Name="WasmTriggerPublishApp">
-    <Message Importance="high" Text="WasmTriggerPublishApp for CoreCLR not implemented" />
+
+  <!--
+    Copy pre-built native files from the runtime pack to the intermediate output path,
+    and register them as WasmNativeAsset items so the WebAssembly SDK can include them
+    in the app bundle (boot JSON, static web assets, etc.).
+  -->
+  <Target Name="_CoreCLRBrowserCopyNativeAssets"
+          AfterTargets="PrepareInputsForWasmBuild"
+          Condition="'$(MicrosoftNetCoreAppRuntimePackRidNativeDir)' != ''">
+    <ItemGroup>
+      <_CoreCLRNativeAsset Include="$(MicrosoftNetCoreAppRuntimePackRidNativeDir)dotnet.native.wasm" />
+      <_CoreCLRNativeAsset Include="$(MicrosoftNetCoreAppRuntimePackRidNativeDir)dotnet.native.js" />
+      <_CoreCLRNativeAsset Include="$(MicrosoftNetCoreAppRuntimePackRidNativeDir)dotnet.native.js.symbols"
+                           Condition="Exists('$(MicrosoftNetCoreAppRuntimePackRidNativeDir)dotnet.native.js.symbols')" />
+      <_CoreCLRNativeAsset Include="$(MicrosoftNetCoreAppRuntimePackRidNativeDir)dotnet.native.worker.mjs"
+                           Condition="Exists('$(MicrosoftNetCoreAppRuntimePackRidNativeDir)dotnet.native.worker.mjs')" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_CoreCLRNativeAsset)"
+          DestinationFolder="$(_WasmIntermediateOutputPath)"
+          SkipUnchangedFiles="true" />
+
+    <ItemGroup>
+      <WasmNativeAsset Include="@(_CoreCLRNativeAsset->'$(_WasmIntermediateOutputPath)%(FileName)%(Extension)')" />
+    </ItemGroup>
   </Target>
 </Project>
