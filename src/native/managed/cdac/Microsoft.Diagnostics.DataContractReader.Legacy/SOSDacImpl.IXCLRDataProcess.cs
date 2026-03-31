@@ -156,8 +156,8 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                 if (displacement is not null)
                     *displacement = 0;
 
-                OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, helperName!);
-                hr = bufLen < (helperName!.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
+                OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, helperName);
+                hr = bufLen < (helperName.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
                 goto Done;
             }
 

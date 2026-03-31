@@ -40,19 +40,22 @@ internal sealed class StubCodeName_1 : IStubCodeName
 
         // Walk the range-section map to find the range section that owns this address.
         TargetPointer fragmentPtr = _rangeSectionMapLookup.FindFragment(_target, _topRangeSectionMap, codeAddress);
+        Data.RangeSectionFragment? matchedFragment = null;
         while (fragmentPtr != TargetPointer.Null)
         {
             Data.RangeSectionFragment frag = _target.ProcessedData.GetOrAdd<Data.RangeSectionFragment>(fragmentPtr);
             if (frag.Contains(codeAddress))
+            {
+                matchedFragment = frag;
                 break;
+            }
             fragmentPtr = frag.Next;
         }
 
-        if (fragmentPtr == TargetPointer.Null)
+        if (matchedFragment is null)
             return false; // Address is not in any known range section.
 
-        Data.RangeSectionFragment fragment = _target.ProcessedData.GetOrAdd<Data.RangeSectionFragment>(fragmentPtr);
-        Data.RangeSection rangeSection = _target.ProcessedData.GetOrAdd<Data.RangeSection>(fragment.RangeSection);
+        Data.RangeSection rangeSection = _target.ProcessedData.GetOrAdd<Data.RangeSection>(matchedFragment.RangeSection);
 
         // Skip range sections that are in the process of being deleted.
         if (rangeSection.NextForDelete != TargetPointer.Null)

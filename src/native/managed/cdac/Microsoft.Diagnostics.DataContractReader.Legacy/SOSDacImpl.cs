@@ -6571,13 +6571,17 @@ public sealed unsafe partial class SOSDacImpl
         catch
         {
             // Heap dumps can cause signature formatting to fail.  Fall back to name only.
-            if (!rts.IsNoMetadataMethod(methodDescHandle, out _))
-                return HResults.E_FAIL;
-
             sb.Clear();
-            TypeNameBuilder.AppendMethodInternal(
-                target, sb, methodDescHandle,
-                TypeNameFormat.FormatNamespace | TypeNameFormat.FormatFullInst);
+            try
+            {
+                TypeNameBuilder.AppendMethodInternal(
+                    target, sb, methodDescHandle,
+                    TypeNameFormat.FormatNamespace | TypeNameFormat.FormatFullInst);
+            }
+            catch
+            {
+                return HResults.E_FAIL;
+            }
         }
 
         string name = sb.ToString();
