@@ -125,13 +125,10 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
 
                 TargetPointer methodDescPtr = executionManager.GetMethodDesc(cbh.Value);
                 MethodDescHandle methodDescHandle = rts.GetMethodDescHandle(methodDescPtr);
-
                 hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
-                goto Done;
             }
-
             // Step 2: check whether the address is a CLR precode or other stub.
-            if (stubCodeName.TryGetStubTypeAndName(codeAddress, out TargetPointer stubMethodDescPtr, out string? stubName))
+            else if (stubCodeName.TryGetStubTypeAndName(codeAddress, out TargetPointer stubMethodDescPtr, out string? stubName))
             {
                 if (displacement is not null)
                     *displacement = 0;
@@ -146,24 +143,20 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                     // CLRStub[name]@address or CLRStub@address
                     hr = FormatCLRStubName(stubName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
                 }
-
-                goto Done;
             }
-
             // Step 3: check whether the address is a JIT helper (auxiliary symbol).
-            if (auxSymbols.TryGetAuxiliarySymbolName(new TargetPointer(codeAddress.Value), out string? helperName))
+            else if (auxSymbols.TryGetAuxiliarySymbolName(new TargetPointer(codeAddress.Value), out string? helperName))
             {
                 if (displacement is not null)
                     *displacement = 0;
 
                 OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, helperName);
                 hr = bufLen < (helperName.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
-                goto Done;
             }
-
-            hr = HResults.COR_E_INVALIDCAST; // E_NOINTERFACE: address is not a known runtime symbol
-
-        Done:;
+            else
+            {
+                hr = HResults.COR_E_INVALIDCAST; // E_NOINTERFACE: address is not a known runtime symbol
+            }
         }
         catch (System.Exception ex)
         {
@@ -761,5 +754,97 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
         }
 #endif
         return hr;
+    }
+
+    /// <summary>
+    /// Formats a method descriptor's full name (namespace, class, method, signature) into the
+    /// caller-supplied output buffer, following the same sized-buffer protocol used elsewhere in
+    /// <see cref="SOSDacImpl"/>.
+    /// </summary>
+    /// <remarks>
+    /// If the method is a dynamic method with no metadata (i.e. a raw CLR stub), the method is
+    /// formatted as a CLR stub instead.  This mirrors the behaviour of the native DAC's
+    /// <c>RawGetMethodName</c> for the <c>mcDynamic &amp;&amp; sigParser.IsNull()</c> case.
+    /// </remarks>
+    private static unsafe int FormatMethodName(
+        Target target,
+        IRuntimeTypeSystem rts,
+        MethodDescHandle methodDescHandle,
+        ClrDataAddress address,
+        uint bufLen,
+        uint* nameLen,
+        char* nameBuf)
+    {
+        // Dynamic methods with no metadata are raw CLR stubs.
+        if (rts.IsNoMetadataMethod(methodDescHandle, out _) && rts.IsDynamicMethod(methodDescHandle))
+            return FormatCLRStubName(null, address.ToTargetPointer(target), bufLen, nameLen, nameBuf);
+
+        StringBuilder sb = new StringBuilder();
+        try
+        {
+            TypeNameBuilder.AppendMethodInternal(
+                target, sb, methodDescHandle,
+                TypeNameFormat.FormatSignature | TypeNameFormat.FormatNamespace | TypeNameFormat.FormatFullInst);
+        }
+        catch
+        {
+            // Heap dumps can cause signature formatting to fail.  Fall back to name only.
+            sb.Clear();
+            try
+            {
+                TypeNameBuilder.AppendMethodInternal(
+                    target, sb, methodDescHandle,
+                    TypeNameFormat.FormatNamespace | TypeNameFormat.FormatFullInst);
+            }
+            catch
+            {
+                return HResults.E_FAIL;
+            }
+        }
+
+        string name = sb.ToString();
+        OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, name);
+        return bufLen < (uint)(name.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
+    }
+
+    /// <summary>
+    /// Formats a CLR stub name in the form <c>CLRStub[name]@address</c> (when
+    /// <paramref name="stubManagerName"/> is non-<see langword="null"/>) or
+    /// <c>CLRStub@address</c> (when it is <see langword="null"/>).
+    /// </summary>
+    private static unsafe int FormatCLRStubName(
+        string? stubManagerName,
+        TargetPointer stubAddress,
+        uint bufLen,
+        uint* symbolLen,
+        char* symbolBuf)
+    {
+        const string Prefix = "CLRStub";
+        const string Open = "[";
+        const string Close = "]";
+        const string AddressSeparator = "@";
+
+        string addressHex = stubAddress.Value.ToString("x");
+
+        // Compute the full formatted string length including the null terminator.
+        int nameLen = Prefix.Length
+            + (stubManagerName is not null ? Open.Length + stubManagerName.Length + Close.Length : 0)
+            + AddressSeparator.Length
+            + addressHex.Length
+            + 1; // null terminator
+
+        if (symbolLen is not null)
+            *symbolLen = checked((uint)nameLen);
+
+        if (symbolBuf is null || bufLen == 0)
+            return HResults.S_FALSE;
+
+        // Build the name into a temporary string and copy into the output buffer.
+        string fullName = stubManagerName is not null
+            ? $"{Prefix}{Open}{stubManagerName}{Close}{AddressSeparator}{addressHex}"
+            : $"{Prefix}{AddressSeparator}{addressHex}";
+
+        OutputBufferHelpers.CopyStringToBuffer(symbolBuf, bufLen, null, fullName);
+        return bufLen < (uint)nameLen ? HResults.S_FALSE : HResults.S_OK;
     }
 }
