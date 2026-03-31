@@ -51,6 +51,7 @@ internal sealed class CachingContractRegistry : ContractRegistry
             [typeof(IBuiltInCOM)] = new BuiltInCOMFactory(),
             [typeof(IConditionalWeakTable)] = new ConditionalWeakTableFactory(),
             [typeof(IAuxiliarySymbols)] = new AuxiliarySymbolsFactory(),
+            [typeof(IStubCodeName)] = new StubCodeNameFactory(),
         };
 
         foreach (IContractFactory<IContract> factory in additionalFactories)

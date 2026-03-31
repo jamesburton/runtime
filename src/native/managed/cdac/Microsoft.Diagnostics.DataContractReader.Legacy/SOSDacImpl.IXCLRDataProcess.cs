@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using System.Text;
 using Microsoft.Diagnostics.DataContractReader.Contracts;
 using Microsoft.Diagnostics.DataContractReader.Contracts.Extensions;
 
@@ -101,7 +102,88 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
         uint* nameLen,
         char* nameBuf,
         ClrDataAddress* displacement)
-        => _legacyProcess is not null ? _legacyProcess.GetRuntimeNameByAddress(address, flags, bufLen, nameLen, nameBuf, displacement) : HResults.E_NOTIMPL;
+    {
+        int hr = HResults.S_OK;
+        try
+        {
+            if (flags != 0)
+                throw new ArgumentException(nameof(flags));
+
+            TargetCodePointer codeAddress = address.ToTargetCodePointer(_target);
+
+            IExecutionManager executionManager = _target.Contracts.ExecutionManager;
+            IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
+            IAuxiliarySymbols auxSymbols = _target.Contracts.AuxiliarySymbols;
+            IStubCodeName stubCodeName = _target.Contracts.StubCodeName;
+
+            // Step 1: check whether the address falls inside a JIT-compiled method body.
+            CodeBlockHandle? cbh = executionManager.GetCodeBlockHandle(codeAddress);
+            if (cbh is not null)
+            {
+                if (displacement is not null)
+                    *displacement = executionManager.GetRelativeOffset(cbh.Value).Value;
+
+                TargetPointer methodDescPtr = executionManager.GetMethodDesc(cbh.Value);
+                MethodDescHandle methodDescHandle = rts.GetMethodDescHandle(methodDescPtr);
+
+                hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
+                goto Done;
+            }
+
+            // Step 2: check whether the address is a CLR precode or other stub.
+            if (stubCodeName.TryGetStubTypeAndName(codeAddress, out TargetPointer stubMethodDescPtr, out string? stubName))
+            {
+                if (displacement is not null)
+                    *displacement = 0;
+
+                if (stubMethodDescPtr != TargetPointer.Null)
+                {
+                    MethodDescHandle methodDescHandle = rts.GetMethodDescHandle(stubMethodDescPtr);
+                    hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
+                }
+                else
+                {
+                    // CLRStub[name]@address or CLRStub@address
+                    hr = FormatCLRStubName(stubName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
+                }
+
+                goto Done;
+            }
+
+            // Step 3: check whether the address is a JIT helper (auxiliary symbol).
+            if (auxSymbols.TryGetAuxiliarySymbolName(new TargetPointer(codeAddress.Value), out string? helperName))
+            {
+                if (displacement is not null)
+                    *displacement = 0;
+
+                OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, helperName!);
+                hr = bufLen < (helperName!.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
+                goto Done;
+            }
+
+            hr = HResults.COR_E_INVALIDCAST; // E_NOINTERFACE: address is not a known runtime symbol
+
+        Done:;
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+
+#if DEBUG
+        if (_legacyProcess is not null)
+        {
+            uint nameLenLocal;
+            const uint debugBufLen = 1024;
+            char* nameBufLocal = stackalloc char[(int)debugBufLen];
+            ClrDataAddress displacementLocal = default;
+            int hrLocal = _legacyProcess.GetRuntimeNameByAddress(
+                address, flags, debugBufLen, &nameLenLocal, nameBufLocal, &displacementLocal);
+            Debug.ValidateHResult(hr, hrLocal);
+        }
+#endif
+        return hr;
+    }
 
     int IXCLRDataProcess.StartEnumAppDomains(ulong* handle)
         => _legacyProcess is not null ? _legacyProcess.StartEnumAppDomains(handle) : HResults.E_NOTIMPL;

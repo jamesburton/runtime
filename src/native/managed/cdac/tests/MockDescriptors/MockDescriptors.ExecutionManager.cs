@@ -385,6 +385,27 @@ internal partial class MockDescriptors
             return rangeSection.Address;
         }
 
+        /// <summary>
+        /// Adds a range section with the <c>RangeList</c> flag set (0x04), used for precode and
+        /// other stub range sections.
+        /// </summary>
+        public TargetPointer AddRangeListRangeSection(JittedCodeRange jittedCodeRange, TargetPointer jitManagerAddress)
+        {
+            var tyInfo = Types[DataType.RangeSection];
+            uint rangeSectionSize = tyInfo.Size.Value;
+            MockMemorySpace.HeapFragment rangeSection = _rangeSectionMapAllocator.Allocate(rangeSectionSize, "RangeSection (RangeList)");
+            Builder.AddHeapFragment(rangeSection);
+            int pointerSize = Builder.TargetTestHelpers.PointerSize;
+            Span<byte> rs = Builder.BorrowAddressRange(rangeSection.Address, (int)rangeSectionSize);
+            Builder.TargetTestHelpers.WritePointer(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.RangeBegin)].Offset, pointerSize), jittedCodeRange.RangeStart);
+            Builder.TargetTestHelpers.WritePointer(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.RangeEndOpen)].Offset, pointerSize), jittedCodeRange.RangeEnd);
+            // 0x04 = RangeSectionFlags.RangeList
+            Builder.TargetTestHelpers.Write(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.Flags)].Offset, sizeof(uint)), (uint)0x04);
+            Builder.TargetTestHelpers.WritePointer(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.JitManager)].Offset, pointerSize), jitManagerAddress);
+
+            return rangeSection.Address;
+        }
+
         public TargetPointer AddReadyToRunRangeSection(JittedCodeRange jittedCodeRange, TargetPointer jitManagerAddress, TargetPointer r2rModule)
         {
             var tyInfo = Types[DataType.RangeSection];
