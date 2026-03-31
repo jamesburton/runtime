@@ -128,21 +128,12 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                 hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
             }
             // Step 2: check whether the address is a CLR precode or other stub.
-            else if (stubCodeName.TryGetStubTypeAndName(codeAddress, out TargetPointer stubMethodDescPtr, out string? stubName))
+            else if (stubCodeName.TryGetStubTypeAndName(codeAddress, out StubManagerKind _, out string? managerName))
             {
                 if (displacement is not null)
                     *displacement = 0;
 
-                if (stubMethodDescPtr != TargetPointer.Null)
-                {
-                    MethodDescHandle methodDescHandle = rts.GetMethodDescHandle(stubMethodDescPtr);
-                    hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
-                }
-                else
-                {
-                    // CLRStub[name]@address or CLRStub@address
-                    hr = FormatCLRStubName(stubName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
-                }
+                hr = FormatCLRStubName(managerName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
             }
             // Step 3: check whether the address is a JIT helper (auxiliary symbol).
             else if (auxSymbols.TryGetAuxiliarySymbolName(new TargetPointer(codeAddress.Value), out string? helperName))

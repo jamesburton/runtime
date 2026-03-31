@@ -11,7 +11,10 @@ public sealed class StubCodeNameFactory : IContractFactory<IStubCodeName>
         Data.RangeSectionMap rangeSectionMap = target.ProcessedData.GetOrAdd<Data.RangeSectionMap>(executionManagerCodeRangeMapAddress);
         return version switch
         {
-            1 => new StubCodeName_1(target, rangeSectionMap),
+            1 => new StubCodeName_1(
+                    target,
+                    rangeSectionMap,
+                    target.ReadGlobalString(Constants.Globals.PrecodeStubManagerName)),
             _ => default(StubCodeName),
         };
     }

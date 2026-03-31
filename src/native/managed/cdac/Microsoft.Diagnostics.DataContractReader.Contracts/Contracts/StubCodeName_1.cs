@@ -1,7 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
 using Microsoft.Diagnostics.DataContractReader.ExecutionManagerHelpers;
 
 namespace Microsoft.Diagnostics.DataContractReader.Contracts;
@@ -23,20 +22,27 @@ internal sealed class StubCodeName_1 : IStubCodeName
     private readonly Data.RangeSectionMap _topRangeSectionMap;
     private readonly RangeSectionMap _rangeSectionMapLookup;
 
-    internal StubCodeName_1(Target target, Data.RangeSectionMap topRangeSectionMap)
+    /// <summary>
+    /// The stub manager name for precode range-list sections, read from the data descriptor
+    /// (native <c>PrecodeStubManager::GetStubManagerName</c> returns this value).
+    /// </summary>
+    private readonly string _precodeStubManagerName;
+
+    internal StubCodeName_1(Target target, Data.RangeSectionMap topRangeSectionMap, string precodeStubManagerName)
     {
         _target = target;
         _topRangeSectionMap = topRangeSectionMap;
         _rangeSectionMapLookup = RangeSectionMap.Create(target);
+        _precodeStubManagerName = precodeStubManagerName;
     }
 
     bool IStubCodeName.TryGetStubTypeAndName(
         TargetCodePointer codeAddress,
-        out TargetPointer methodDescAddress,
-        out string? stubName)
+        out StubManagerKind kind,
+        out string? managerName)
     {
-        methodDescAddress = TargetPointer.Null;
-        stubName = null;
+        kind = default;
+        managerName = null;
 
         // Walk the range-section map to find the range section that owns this address.
         TargetPointer fragmentPtr = _rangeSectionMapLookup.FindFragment(_target, _topRangeSectionMap, codeAddress);
@@ -64,26 +70,15 @@ internal sealed class StubCodeName_1 : IStubCodeName
         bool isRangeList = (rangeSection.Flags & RangeSectionFlagRangeList) != 0;
         if (!isRangeList)
         {
-            // This is a JIT code heap.  GetCodeBlockHandle already handles managed methods
-            // and returns null for stub code blocks.  We do not yet identify named code-heap
-            // stubs (e.g. VSD dispatch stubs or StubLink stubs) in this version.
+            // This is a JIT code heap. GetCodeBlockHandle already handles managed methods;
+            // we do not identify code-heap stubs (e.g. VSD dispatch/StubLink) here.
             return false;
         }
 
-        // The address is in a precode / range-list section.  Try to resolve it to a MethodDesc.
-        IPrecodeStubs precodeStubs = _target.Contracts.PrecodeStubs;
-        try
-        {
-            methodDescAddress = precodeStubs.GetMethodDescFromStubAddress(codeAddress);
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            // The bytes at codeAddress do not match any known precode layout.  This can happen
-            // for range-list stubs that are not precodes (e.g. DynamicHelper stubs).
-            // We still report this as "a CLR stub" so the caller can format it as
-            // "CLRStub@address".  methodDescAddress remains Null and stubName remains null.
-            return true;
-        }
+        // Range-list sections are owned by PrecodeStubManager. Return its manager name
+        // as exposed by the data descriptor.
+        kind = StubManagerKind.Precode;
+        managerName = _precodeStubManagerName;
+        return true;
     }
 }

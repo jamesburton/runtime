@@ -4,6 +4,15 @@
 namespace Microsoft.Diagnostics.DataContractReader.Contracts;
 
 /// <summary>
+/// Identifies the category of CLR stub manager that owns a code address.
+/// </summary>
+public enum StubManagerKind
+{
+    /// <summary>The address is in a precode range-list section (PrecodeStubManager territory).</summary>
+    Precode,
+}
+
+/// <summary>
 /// Contract for identifying and naming CLR stubs at code addresses.
 /// </summary>
 public interface IStubCodeName : IContract
@@ -12,17 +21,16 @@ public interface IStubCodeName : IContract
 
     /// <summary>
     /// Tries to determine whether the given code address is a CLR stub, and if so, what
-    /// stub type it is and what name is associated with it.
+    /// kind of stub manager owns it and what name is associated with it.
     /// </summary>
     /// <param name="codeAddress">The code address to inspect.</param>
-    /// <param name="methodDescAddress">
-    ///   On success, the address of the <c>MethodDesc</c> if the stub is a precode pointing
-    ///   to a method descriptor; <see cref="TargetPointer.Null"/> for other stub kinds.
+    /// <param name="kind">
+    ///   On success, the <see cref="StubManagerKind"/> identifying the stub manager.
     /// </param>
-    /// <param name="stubName">
-    ///   On success, a descriptive name for the stub when <paramref name="methodDescAddress"/>
-    ///   is <see cref="TargetPointer.Null"/> and a name is known; <see langword="null"/> when
-    ///   no specific name is available (the caller should use a "CLRStub@address" format).
+    /// <param name="managerName">
+    ///   On success, the stub manager name returned by <c>GetStubManagerName</c> in the
+    ///   native runtime (for example <c>"MethodDescPrestub"</c> for
+    ///   <c>PrecodeStubManager</c>); <see langword="null"/> if no name is available.
     /// </param>
     /// <returns>
     ///   <see langword="true"/> if the address is a recognized CLR stub;
@@ -30,8 +38,8 @@ public interface IStubCodeName : IContract
     /// </returns>
     bool TryGetStubTypeAndName(
         TargetCodePointer codeAddress,
-        out TargetPointer methodDescAddress,
-        out string? stubName) => throw new System.NotImplementedException();
+        out StubManagerKind kind,
+        out string? managerName) => throw new System.NotImplementedException();
 }
 
 /// <summary>Default (no-op) implementation returned when the StubCodeName contract is unavailable.</summary>
