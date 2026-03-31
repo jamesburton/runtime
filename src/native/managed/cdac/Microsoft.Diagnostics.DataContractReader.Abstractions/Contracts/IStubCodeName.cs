@@ -4,12 +4,27 @@
 namespace Microsoft.Diagnostics.DataContractReader.Contracts;
 
 /// <summary>
-/// Identifies the category of CLR stub manager that owns a code address.
+/// Identifies which CLR stub manager category owns a code address.
+/// Corresponds to the native <c>StubManager</c> subclass hierarchy.
 /// </summary>
 public enum StubManagerKind
 {
-    /// <summary>The address is in a precode range-list section (PrecodeStubManager territory).</summary>
+    /// <summary>A precode stub (PrecodeStubManager). The manager name is typically <c>"MethodDescPrestub"</c>.</summary>
     Precode,
+    /// <summary>A stub-link stub, such as a multicast delegate stub (StubLinkStubManager).</summary>
+    StubLink,
+    /// <summary>A back-to-back jump stub (JumpStubStubManager).</summary>
+    JumpStub,
+    /// <summary>A code-heap stub identified by RangeSectionStubManager, such as a VSD dispatch or resolve stub.</summary>
+    RangeSection,
+    /// <summary>An IL stub generated for interop (ILStubManager).</summary>
+    ILStub,
+    /// <summary>A P/Invoke thunk stub (PInvokeILStubManager).</summary>
+    PInvoke,
+    /// <summary>An interop dispatch stub (InteropDispatchStubManager).</summary>
+    InteropDispatch,
+    /// <summary>A tail-call stub (TailCallStubManager).</summary>
+    TailCall,
 }
 
 /// <summary>

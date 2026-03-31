@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using Microsoft.Diagnostics.DataContractReader.Data;
 
@@ -143,5 +144,41 @@ internal class PrecodeStubsCommon<TPrecodeStubsImplementation, TStubPrecodeData>
         ValidPrecode precode = GetPrecodeFromEntryPoint(entryPoint);
 
         return precode.GetMethodDesc(_target, MachineDescriptor);
+    }
+
+    IEnumerable<TargetCodePointer> IPrecodeStubs.GetPossiblePrecodeAddresses(TargetCodePointer codeAddress)
+    {
+        // Strip platform-specific bits (e.g. ARM32 thumb) to obtain the readable instruction pointer.
+        TargetPointer instrPointer = CodePointerReadableInstrPointer(codeAddress);
+
+        // PRECODE_ALIGNMENT == sizeof(void*).
+        ulong alignment = (ulong)_target.PointerSize;
+
+        // Align down to PRECODE_ALIGNMENT, mirroring AlignDown(TO_TADDR(address), PRECODE_ALIGNMENT).
+        TargetPointer alignedPointer = new TargetPointer(instrPointer.Value & ~(alignment - 1));
+
+        // Number of iterations = maxPrecodeSize / PRECODE_ALIGNMENT.
+        // maxPrecodeSize = max(sizeof(StubPrecode), sizeof(ThisPtrRetBufPrecode) [AMD64 only]).
+        // On every platform that defines HAS_THISPTR_RETBUF_PRECODE (AMD64), both sizes are equal,
+        // so maxPrecodeSize == sizeof(StubPrecode) == StubPrecodeSize from the descriptor.
+        // Fall back to 24 / PointerSize when the descriptor field is absent (v1/v2).
+        int maxIterations = MachineDescriptor.StubPrecodeSize is byte stubPrecodeSize
+            ? stubPrecodeSize / _target.PointerSize
+            : 24 / _target.PointerSize;  // 24 bytes is sizeof(StubPrecode) on most platforms
+
+        bool hasThumbBit = _codePointerFlags.HasFlag(CodePointerFlags.HasArm32ThumbBit);
+
+        for (int i = 0; i < maxIterations; i++)
+        {
+            TargetPointer candidate = new TargetPointer(alignedPointer.Value - (ulong)(i * _target.PointerSize));
+
+            // On ARM32 the entry-point PCODE has the Thumb bit set (mirrors the native
+            // alignedAddress += THUMB_CODE after AlignDown).
+            TargetCodePointer entryPoint = hasThumbBit
+                ? new TargetCodePointer(candidate.Value | 1)
+                : new TargetCodePointer(candidate.Value);
+
+            yield return entryPoint;
+        }
     }
 }

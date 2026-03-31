@@ -128,12 +128,55 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                 hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
             }
             // Step 2: check whether the address is a CLR precode or other stub.
-            else if (stubCodeName.TryGetStubTypeAndName(codeAddress, out StubManagerKind _, out string? managerName))
+            else if (stubCodeName.TryGetStubTypeAndName(codeAddress, out StubManagerKind kind, out string? managerName))
             {
                 if (displacement is not null)
                     *displacement = 0;
 
+                if (kind == StubManagerKind.Precode)
+                {
+                    // Mirror the native RawGetMethodName loop: walk backwards through the
+                    // PRECODE_ALIGNMENT-aligned candidate entry points and take the first one
+                    // whose MethodDesc is valid.
+                    IPrecodeStubs precodeStubs = _target.Contracts.PrecodeStubs;
+                    foreach (TargetCodePointer possibleEntry in precodeStubs.GetPossiblePrecodeAddresses(codeAddress))
+                    {
+                        TargetPointer methodDescPtr;
+                        try
+                        {
+                            methodDescPtr = precodeStubs.GetMethodDescFromStubAddress(possibleEntry);
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // Not a valid precode at this candidate address; try the next one.
+                            continue;
+                        }
+
+                        if (methodDescPtr == TargetPointer.Null)
+                            continue;
+
+                        try
+                        {
+                            // Validate the MethodDesc. If GetMethodDescHandle succeeds, the MD is good.
+                            MethodDescHandle methodDescHandle = rts.GetMethodDescHandle(methodDescPtr);
+
+                            if (displacement is not null)
+                                *displacement = address.Value - possibleEntry.ToAddress(_target).Value;
+
+                            hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
+                            goto DoneWithPrecode;
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // MethodDesc pointer was invalid (corrupt precode data); try the next candidate.
+                        }
+                    }
+                }
+
+                // Fallback for all stub kinds (or when the precode loop found no valid MethodDesc):
+                // format as a CLR stub using the manager name.
                 hr = FormatCLRStubName(managerName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
+                DoneWithPrecode:;
             }
             // Step 3: check whether the address is a JIT helper (auxiliary symbol).
             else if (auxSymbols.TryGetAuxiliarySymbolName(new TargetPointer(codeAddress.Value), out string? helperName))

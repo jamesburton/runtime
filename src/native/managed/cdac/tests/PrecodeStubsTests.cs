@@ -7,6 +7,7 @@ using Moq;
 using Microsoft.Diagnostics.DataContractReader.Contracts;
 using System.Collections.Generic;
 using System;
+using System.Linq;
 using System.Reflection;
 
 namespace Microsoft.Diagnostics.DataContractReader.Tests;
@@ -407,5 +408,31 @@ public class PrecodeStubsTests
             var actualMethodDesc2 = precodeContract.GetMethodDescFromStubAddress(stub2);
             Assert.Equal(expectedMethodDesc2, actualMethodDesc2);
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(PrecodeTestDescriptorDataWithContractVersion))]
+    public void GetPossiblePrecodeAddresses_ContainsEntryPoint(PrecodeTestDescriptor test, int contractVersion)
+    {
+        var builder = new PrecodeBuilder(test.Arch, contractVersion);
+        builder.AddPlatformMetadata(test);
+
+        TargetPointer expectedMethodDesc = new TargetPointer(0xeeee_eee0u);
+        TargetCodePointer entryPoint = builder.AddStubPrecodeEntry("Stub", test, expectedMethodDesc);
+
+        var target = CreateTarget(builder);
+        var precodeContract = target.Contracts.PrecodeStubs;
+
+        // Simulate an address one PRECODE_ALIGNMENT step inside the precode code.
+        // Strip any ARM32 thumb bit first (callers pass CLRDATA_ADDRESS-style values
+        // that do not have the thumb bit set, matching the native assertion in RawGetMethodName).
+        ulong readableEntry = entryPoint.Value & ~1ul;
+        TargetCodePointer insideAddress = new TargetCodePointer(readableEntry + (ulong)target.PointerSize);
+
+        List<TargetCodePointer> candidates = precodeContract.GetPossiblePrecodeAddresses(insideAddress).ToList();
+
+        // The list must be non-empty and must contain the actual entry point.
+        Assert.NotEmpty(candidates);
+        Assert.Contains(entryPoint, candidates);
     }
 }
