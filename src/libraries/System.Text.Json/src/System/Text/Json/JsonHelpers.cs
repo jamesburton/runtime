@@ -512,5 +512,16 @@ namespace System.Text.Json
                 }
             }
         }
+
+        /// <summary>
+        /// Returns the UTF-8 byte representation of the newline string configured in the specified <see cref="JsonWriterOptions"/>.
+        /// </summary>
+        public static ReadOnlyMemory<byte> GetNewLineBytes(JsonWriterOptions writerOptions)
+        {
+            Debug.Assert(writerOptions.NewLine is "\n" or "\r\n");
+            return writerOptions.NewLine.Length == 2
+                ? "\r\n"u8.ToArray()
+                : "\n"u8.ToArray();
+        }
     }
 }

@@ -513,5 +513,124 @@ namespace System.Text.Json.Serialization.Tests
 
             public void Dispose() => _cts.Dispose();
         }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(5)]
+        [InlineData(100)]
+        public async Task SerializeAsyncEnumerable_Objects_ProducesJsonLines(int count)
+        {
+            using var stream = new MemoryStream();
+
+            await JsonSerializer.SerializeAsyncEnumerable(
+                stream,
+                GenerateItems(count),
+                ResolveJsonTypeInfo<SimpleTestClass>(),
+                topLevelValues: true);
+
+            stream.Position = 0;
+            string result = new StreamReader(stream).ReadToEnd();
+
+            string[] lines = result.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal(count, lines.Length);
+
+            for (int i = 0; i < count; i++)
+            {
+                SimpleTestClass deserialized = JsonSerializer.Deserialize<SimpleTestClass>(lines[i]);
+                Assert.Equal(i, deserialized.MyInt32);
+            }
+
+            static async IAsyncEnumerable<SimpleTestClass> GenerateItems(int count)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    var obj = new SimpleTestClass();
+                    obj.Initialize();
+                    obj.MyInt32 = i;
+                    yield return obj;
+                    await Task.Yield();
+                }
+            }
+        }
+
+        [Fact]
+        public async Task SerializeAsyncEnumerable_RoundTripsWithDeserializeAsyncEnumerable()
+        {
+            const int count = 50;
+            using var stream = new MemoryStream();
+
+            await JsonSerializer.SerializeAsyncEnumerable(
+                stream,
+                GenerateItems(count),
+                ResolveJsonTypeInfo<SimpleTestClass>(),
+                topLevelValues: true);
+
+            stream.Position = 0;
+
+            int i = 0;
+            await foreach (SimpleTestClass item in JsonSerializer.DeserializeAsyncEnumerable<SimpleTestClass>(stream, topLevelValues: true))
+            {
+                Assert.Equal(i++, item.MyInt32);
+            }
+
+            Assert.Equal(count, i);
+
+            static async IAsyncEnumerable<SimpleTestClass> GenerateItems(int count)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    var obj = new SimpleTestClass();
+                    obj.Initialize();
+                    obj.MyInt32 = i;
+                    yield return obj;
+                    await Task.Yield();
+                }
+            }
+        }
+
+        [Fact]
+        public async Task SerializeAsyncEnumerable_EmptySequence_ProducesEmptyOutput()
+        {
+            using var stream = new MemoryStream();
+
+            await JsonSerializer.SerializeAsyncEnumerable(
+                stream,
+                EmptyAsyncEnumerable(),
+                ResolveJsonTypeInfo<int>(),
+                topLevelValues: true);
+
+            Assert.Equal(0, stream.Length);
+
+            static async IAsyncEnumerable<int> EmptyAsyncEnumerable()
+            {
+                await Task.CompletedTask;
+                yield break;
+            }
+        }
+
+        [Fact]
+        public async Task SerializeAsyncEnumerable_PrimitiveValues()
+        {
+            using var stream = new MemoryStream();
+
+            await JsonSerializer.SerializeAsyncEnumerable(
+                stream,
+                GenerateInts(),
+                ResolveJsonTypeInfo<int>(),
+                topLevelValues: true);
+
+            stream.Position = 0;
+            string result = new StreamReader(stream).ReadToEnd();
+            Assert.Equal($"1{Environment.NewLine}2{Environment.NewLine}3{Environment.NewLine}", result);
+
+            static async IAsyncEnumerable<int> GenerateInts()
+            {
+                yield return 1;
+                yield return 2;
+                yield return 3;
+                await Task.CompletedTask;
+            }
+        }
     }
 }
