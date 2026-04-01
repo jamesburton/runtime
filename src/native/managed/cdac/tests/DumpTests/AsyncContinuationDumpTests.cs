@@ -16,6 +16,7 @@ namespace Microsoft.Diagnostics.DataContractReader.DumpTests;
 public class AsyncContinuationDumpTests : DumpTestBase
 {
     protected override string DebuggeeName => "AsyncContinuation";
+    protected override string DumpType => "full";
 
     [ConditionalTheory]
     [MemberData(nameof(TestConfigurations))]

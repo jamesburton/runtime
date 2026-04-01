@@ -4,6 +4,7 @@
     <Features>$(Features);runtime-async=on</Features>
     <EnablePreviewFeatures>true</EnablePreviewFeatures>
     <NoWarn>$(NoWarn);CA2007;CA2252</NoWarn>
-    <DumpTypes>Heap</DumpTypes>
+    <!-- Full dump needed so that module metadata is available for type lookup -->
+    <DumpTypes>Full</DumpTypes>
   </PropertyGroup>
 </Project>
