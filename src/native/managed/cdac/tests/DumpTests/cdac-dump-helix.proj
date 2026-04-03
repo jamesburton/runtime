@@ -165,6 +165,20 @@
           Include="echo '{&quot;os&quot;:&quot;$(TargetOS)&quot;,&quot;arch&quot;:&quot;$(TargetArchitecture)&quot;,&quot;debuggees&quot;:[$(_EvalDebuggeeJsonArray)]}' &gt; $HELIX_WORKITEM_PAYLOAD/dumps/local/dump-info.json" />
     </ItemGroup>
 
+    <!--
+      Stage shared-framework symbols into the dump tree so that:
+        1. Tests running in the same Helix work item (test mode) can find them via GetSymbolPaths.
+        2. They are included in dumps.tar.gz for xplat testing.
+      The runtime-symbols/ directory in the payload was populated at payload-prep time by
+      PrepareHelixPayload with coreclr.* and System.Private.CoreLib.dll from the testhost.
+    -->
+    <ItemGroup>
+      <_HelixCommandLines Condition="'$(TargetOS)' == 'windows'"
+          Include="mkdir %25HELIX_WORKITEM_PAYLOAD%25\dumps\local\symbols\runtime 2&gt;nul &amp; xcopy /Y /Q %25HELIX_WORKITEM_PAYLOAD%25\runtime-symbols\* %25HELIX_WORKITEM_PAYLOAD%25\dumps\local\symbols\runtime\ 2&gt;nul" />
+      <_HelixCommandLines Condition="'$(TargetOS)' != 'windows'"
+          Include="mkdir -p $HELIX_WORKITEM_PAYLOAD/dumps/local/symbols/runtime &amp;&amp; cp $HELIX_WORKITEM_PAYLOAD/runtime-symbols/* $HELIX_WORKITEM_PAYLOAD/dumps/local/symbols/runtime/" />
+    </ItemGroup>
+
     <!-- Test mode only: run xunit, capture exit code, propagate after archive. -->
     <ItemGroup Condition="'$(DumpOnly)' != 'true'">
       <_HelixCommandLines Condition="'$(TargetOS)' == 'windows'"

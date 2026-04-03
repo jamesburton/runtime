@@ -113,6 +113,27 @@
     <WriteLinesToFile File="$(HelixPayloadDir)/debuggee-metadata.props" Lines="@(_MetadataLines)" Overwrite="true"
                      Condition="'$(SkipDebuggeeCopy)' != 'true'" />
 
+    <!--
+      Copy key shared-framework modules (coreclr, SPC) to runtime-symbols/ in the
+      payload so the Helix command can stage them under dumps/local/symbols/runtime/
+      before tarring, making them available for xplat tests via GetSymbolPaths.
+      These are the files ClrMD needs when PE/ELF sections are absent from heap dumps.
+    -->
+    <PropertyGroup>
+      <_HelixRuntimeSymbolsDir>$([MSBuild]::NormalizeDirectory('$(HelixPayloadDir)', 'runtime-symbols'))</_HelixRuntimeSymbolsDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/coreclr.dll" />
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/libcoreclr.so" />
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/libcoreclr.dylib" />
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/System.Private.CoreLib.dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(_HelixRuntimeSymbolsDir)" Condition="'@(_RuntimeSymbolSrc)' != ''" />
+    <Copy SourceFiles="@(_RuntimeSymbolSrc)"
+          DestinationFolder="$(_HelixRuntimeSymbolsDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_RuntimeSymbolSrc)' != ''" />
+
     <Message Text="Helix payload prepared at $(HelixPayloadDir)" Importance="high" />
   </Target>
 

@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using Microsoft.Diagnostics.Runtime;
 
 namespace Microsoft.Diagnostics.DataContractReader.DumpTests;
@@ -32,9 +33,20 @@ internal sealed class ClrMdDumpHost : IDisposable
     /// <summary>
     /// Open a crash dump and prepare it for cDAC analysis.
     /// </summary>
-    public static ClrMdDumpHost Open(string dumpPath)
+    /// <param name="dumpPath">Path to the crash dump file.</param>
+    /// <param name="symbolPaths">
+    /// Optional directories to search when ClrMD needs to locate a module on disk
+    /// (e.g., when PE/ELF sections are absent from a heap dump).
+    /// </param>
+    public static ClrMdDumpHost Open(string dumpPath, IEnumerable<string>? symbolPaths = null)
     {
         DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+        if (symbolPaths is not null)
+        {
+            string joined = string.Join(";", symbolPaths);
+            if (joined.Length > 0)
+                dataTarget.SetSymbolPath(joined);
+        }
         return new ClrMdDumpHost(dumpPath, dataTarget);
     }
 

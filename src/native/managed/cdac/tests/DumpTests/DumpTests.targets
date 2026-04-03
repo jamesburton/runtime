@@ -120,6 +120,39 @@
     <MSBuild Projects="$(MSBuildProjectFile)"
              Targets="_WriteDumpInfo"
              Properties="DumpRuntimeVersion=%(DumpRuntimeVersion.Identity)" />
+
+    <!-- Copy shared-framework modules (coreclr, SPC) so tests can find them via
+         GetSymbolPaths when PE/ELF sections are absent from heap dumps. -->
+    <MSBuild Projects="$(MSBuildProjectFile)"
+             Targets="_CopyLocalRuntimeSymbols" />
+  </Target>
+
+  <!--
+    Copies the key shared-framework modules from the local testhost to
+    $(DumpOutputDir)local/symbols/runtime/ so that ClrMD can locate them
+    via SetSymbolPath when memory-reads fail (e.g. PE sections absent from
+    a heap dump).  Only runs when "local" is among the requested versions.
+  -->
+  <Target Name="_CopyLocalRuntimeSymbols"
+          Condition="$(DumpVersions.Contains('local')) OR '$(DumpVersions)' == ''">
+    <PropertyGroup>
+      <_LocalSymbolsDir>$([MSBuild]::NormalizeDirectory('$(DumpOutputDir)', 'local', 'symbols', 'runtime'))</_LocalSymbolsDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/coreclr.dll" />
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/libcoreclr.so" />
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/libcoreclr.dylib" />
+      <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/System.Private.CoreLib.dll" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(_LocalSymbolsDir)" Condition="'@(_RuntimeSymbolSrc)' != ''" />
+    <Copy SourceFiles="@(_RuntimeSymbolSrc)"
+          DestinationFolder="$(_LocalSymbolsDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_RuntimeSymbolSrc)' != ''" />
+    <Message Text="Copied runtime symbols to $(_LocalSymbolsDir)" Importance="normal"
+             Condition="'@(_RuntimeSymbolSrc)' != ''" />
   </Target>
 
   <!-- Writes dump-info.json for a single runtime version directory. -->

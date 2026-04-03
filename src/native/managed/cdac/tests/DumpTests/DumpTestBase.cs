@@ -98,7 +98,7 @@ public abstract class DumpTestBase : IDisposable
             throw new SkipTestException($"No {config.R2RMode} dump for {debuggeeName}: {dumpPath}");
         }
 
-        _host = ClrMdDumpHost.Open(dumpPath);
+        _host = ClrMdDumpHost.Open(dumpPath, GetSymbolPaths(versionDir));
         ulong contractDescriptor = _host.FindContractDescriptorAddress();
 
         bool created = ContractDescriptorTarget.TryCreate(
@@ -161,6 +161,20 @@ public abstract class DumpTestBase : IDisposable
                     throw new SkipTestException($"[{_dumpInfo.Arch}] {attr.Reason}");
             }
         }
+    }
+
+    /// <summary>
+    /// Returns directories that ClrMD should search when it cannot locate a module
+    /// in dump memory (e.g., PE/ELF sections absent from a heap dump).
+    /// On Helix the Helix command copies the shared-framework symbols into
+    /// <c>symbols/runtime/</c> inside the dump-root version directory before the
+    /// test run; locally the same copy is made by the <c>GenerateAllDumps</c> target.
+    /// </summary>
+    private static IEnumerable<string> GetSymbolPaths(string versionDir)
+    {
+        string runtimeSymbols = Path.Combine(versionDir, "symbols", "runtime");
+        if (Directory.Exists(runtimeSymbols))
+            yield return runtimeSymbols;
     }
 
     private static string GetDumpRoot()
