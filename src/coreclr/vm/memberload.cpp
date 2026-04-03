@@ -77,6 +77,38 @@ void DECLSPEC_NORETURN MemberLoader::ThrowMissingFieldException(MethodTable* pMT
     MAKE_FULLY_QUALIFIED_MEMBER_NAME(szFullName, NULL, szClassName, (szMember?szMember:"?"), "");
     _ASSERTE(szFullName!=NULL);
     MAKE_WIDEPTR_FROMUTF8(szwFullName, szFullName);
+
+    if (pMT != NULL)
+    {
+        PEAssembly *pPEAssembly = pMT->GetModule()->GetPEAssembly();
+        SString sAlcName;
+        pPEAssembly->GetAssemblyBinder()->GetNameForDiagnostics(sAlcName);
+        SString sAssemblyDisplayName;
+        pPEAssembly->GetDisplayName(sAssemblyDisplayName);
+        SString assemblyPath{ pPEAssembly->GetPath() };
+
+        SString resStr;
+        SString formatted;
+        if (assemblyPath.IsEmpty())
+        {
+            if (resStr.LoadResource(IDS_EE_MISSING_FIELD_DETAIL_BYTE_ARRAY))
+            {
+                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                        SString{ SString::Utf8, szFullName }, sAssemblyDisplayName, sAlcName);
+                EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_GENERIC, formatted.GetUnicode()));
+            }
+        }
+        else
+        {
+            if (resStr.LoadResource(IDS_EE_MISSING_FIELD_DETAIL_LOCATION))
+            {
+                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                        SString{ SString::Utf8, szFullName }, sAssemblyDisplayName, sAlcName, assemblyPath);
+                EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_GENERIC, formatted.GetUnicode()));
+            }
+        }
+    }
+
     EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_MISSING_FIELD, szwFullName));
 }
 
@@ -109,19 +141,50 @@ void DECLSPEC_NORETURN MemberLoader::ThrowMissingMethodException(MethodTable* pM
     if (szMember == NULL)
         szMember = "?";
 
+    SString sMemberName;
     if (pSig && cSig && pModule && pModule->IsFullModule())
     {
         MetaSig tmp(pSig, cSig, static_cast<Module*>(pModule), pTypeContext);
         SigFormat sf(tmp, szMember, szClassName, NULL);
-        MAKE_WIDEPTR_FROMUTF8(szwFullName, sf.GetCString());
-        EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_MISSING_METHOD, szwFullName));
+        sMemberName.SetUTF8(sf.GetCString());
     }
     else
     {
-        SString typeName;
-        typeName.Printf("%s.%s", szClassName, szMember);
-        EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_MISSING_METHOD, typeName.GetUnicode()));
+        sMemberName.Printf("%s.%s", szClassName, szMember);
     }
+
+    if (pMT != NULL)
+    {
+        PEAssembly *pPEAssembly = pMT->GetModule()->GetPEAssembly();
+        SString sAlcName;
+        pPEAssembly->GetAssemblyBinder()->GetNameForDiagnostics(sAlcName);
+        SString sAssemblyDisplayName;
+        pPEAssembly->GetDisplayName(sAssemblyDisplayName);
+        SString assemblyPath{ pPEAssembly->GetPath() };
+
+        SString resStr;
+        SString formatted;
+        if (assemblyPath.IsEmpty())
+        {
+            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_DETAIL_BYTE_ARRAY))
+            {
+                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                        sMemberName, sAssemblyDisplayName, sAlcName);
+                EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_GENERIC, formatted.GetUnicode()));
+            }
+        }
+        else
+        {
+            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_DETAIL_LOCATION))
+            {
+                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                        sMemberName, sAssemblyDisplayName, sAlcName, assemblyPath);
+                EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_GENERIC, formatted.GetUnicode()));
+            }
+        }
+    }
+
+    EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_MISSING_METHOD, sMemberName.GetUnicode()));
 }
 
 //---------------------------------------------------------------------------------------
