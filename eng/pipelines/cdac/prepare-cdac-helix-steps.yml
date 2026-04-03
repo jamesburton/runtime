@@ -17,16 +17,6 @@ steps:
       -bl:$(Build.SourcesDirectory)/artifacts/log/BuildDebuggees.binlog
     displayName: 'Build Debuggees'
 
-- script: $(Build.SourcesDirectory)$(dir).dotnet$(dir)dotnet$(exeExt) build
-    $(Build.SourcesDirectory)/src/native/managed/cdac/tests/DumpTests/Microsoft.Diagnostics.DataContractReader.DumpTests.csproj
-    /p:PrepareHelixPayload=true
-    /p:SkipDebuggeeCopy=${{ parameters.skipDebuggeeCopy }}
-    /p:Configuration=$(_BuildConfig)
-    /p:HelixPayloadDir=$(Build.SourcesDirectory)/artifacts/helixPayload/cdac
-    /p:SkipDumpVersions=net10.0
-    -bl:$(Build.SourcesDirectory)/artifacts/log/DumpTestPayload.binlog
-  displayName: 'Prepare Helix Payload'
-
 - pwsh: |
     $testhostDir = Get-ChildItem -Directory -Path "$(Build.SourcesDirectory)/artifacts/bin/testhost/net*-$(osGroup)-*-$(archType)" | Select-Object -First 1 -ExpandProperty FullName
     if (-not $testhostDir) {
@@ -50,3 +40,14 @@ steps:
     Write-Host "Helix queue: $queue"
     Write-Host "##vso[task.setvariable variable=CdacHelixQueue]$queue"
   displayName: 'Find TestHost Directory and Helix Queue'
+
+- script: $(Build.SourcesDirectory)$(dir).dotnet$(dir)dotnet$(exeExt) build
+    $(Build.SourcesDirectory)/src/native/managed/cdac/tests/DumpTests/Microsoft.Diagnostics.DataContractReader.DumpTests.csproj
+    /p:PrepareHelixPayload=true
+    /p:SkipDebuggeeCopy=${{ parameters.skipDebuggeeCopy }}
+    /p:Configuration=$(_BuildConfig)
+    /p:TestHostDir=$(TestHostPayloadDir)
+    /p:HelixPayloadDir=$(Build.SourcesDirectory)/artifacts/helixPayload/cdac
+    /p:SkipDumpVersions=net10.0
+    -bl:$(Build.SourcesDirectory)/artifacts/log/DumpTestPayload.binlog
+  displayName: 'Prepare Helix Payload'

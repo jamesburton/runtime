@@ -114,25 +114,28 @@
                      Condition="'$(SkipDebuggeeCopy)' != 'true'" />
 
     <!--
-      Copy key shared-framework modules (coreclr, SPC) to runtime-symbols/ in the
-      payload so the Helix command can stage them under dumps/local/symbols/runtime/
-      before tarring, making them available for xplat tests via GetSymbolPaths.
-      These are the files ClrMD needs when PE/ELF sections are absent from heap dumps.
+      Copy key shared-framework modules (coreclr, SPC) directly into
+      dumps/local/symbols/runtime/ inside the payload so they are included
+      in the dumps.tar.gz archive produced by the Helix work item command.
+      ClrMD needs these files when PE/ELF sections are absent from heap dumps
+      (GetSymbolPaths in DumpTestBase.cs points ClrMD to this directory).
+      Skipped for x-plat test-only mode: those jobs use dumps from the gen
+      stage which already contain the symbols directory.
     -->
-    <PropertyGroup>
-      <_HelixRuntimeSymbolsDir>$([MSBuild]::NormalizeDirectory('$(HelixPayloadDir)', 'runtime-symbols'))</_HelixRuntimeSymbolsDir>
+    <PropertyGroup Condition="'$(SkipDebuggeeCopy)' != 'true'">
+      <_HelixRuntimeSymbolsDir>$([MSBuild]::NormalizeDirectory('$(HelixPayloadDir)', 'dumps', 'local', 'symbols', 'runtime'))</_HelixRuntimeSymbolsDir>
     </PropertyGroup>
-    <ItemGroup>
+    <ItemGroup Condition="'$(SkipDebuggeeCopy)' != 'true'">
       <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/coreclr.dll" />
       <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/libcoreclr.so" />
       <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/libcoreclr.dylib" />
       <_RuntimeSymbolSrc Include="$(TestHostDir)shared/Microsoft.NETCore.App/**/System.Private.CoreLib.dll" />
     </ItemGroup>
-    <MakeDir Directories="$(_HelixRuntimeSymbolsDir)" Condition="'@(_RuntimeSymbolSrc)' != ''" />
+    <MakeDir Directories="$(_HelixRuntimeSymbolsDir)" Condition="'$(SkipDebuggeeCopy)' != 'true' AND '@(_RuntimeSymbolSrc)' != ''" />
     <Copy SourceFiles="@(_RuntimeSymbolSrc)"
           DestinationFolder="$(_HelixRuntimeSymbolsDir)"
           SkipUnchangedFiles="true"
-          Condition="'@(_RuntimeSymbolSrc)' != ''" />
+          Condition="'$(SkipDebuggeeCopy)' != 'true' AND '@(_RuntimeSymbolSrc)' != ''" />
 
     <Message Text="Helix payload prepared at $(HelixPayloadDir)" Importance="high" />
   </Target>
