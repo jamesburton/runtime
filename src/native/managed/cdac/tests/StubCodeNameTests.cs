@@ -15,9 +15,16 @@ public class StubCodeNameTests
     private const ulong PrecodeRangeStart = 0x0b0b_0000u;
     private const uint PrecodeRangeSize = 0x1_0000u;
 
-    private const string TestPrecodeStubManagerName = "MethodDescPrestub";
+    // Arbitrary address for ThePreStub – must be outside any range section.
+    private const ulong ThePreStubAddress = 0xc0ff_ee00u;
 
-    private static Target CreateTarget(MockDescriptors.ExecutionManager emBuilder)
+    // Stub code block kind values matching vm/codeman.h.
+    private const int StubCodeBlock_StubPrecode = 4;
+    private const int StubCodeBlock_FixupPrecode = 5;
+    private const int StubCodeBlock_VsdDispatchStub = 6;
+    private const int StubCodeBlock_StubLink = 0x12;
+
+    private static Target CreateTarget(MockDescriptors.ExecutionManager emBuilder, ulong thePreStubAddress = 0)
     {
         var arch = emBuilder.Builder.TargetTestHelpers.Arch;
         TestPlaceholderTarget.ReadFromTargetDelegate reader = emBuilder.Builder.GetMemoryContext().ReadFromTarget;
@@ -25,8 +32,7 @@ public class StubCodeNameTests
             arch,
             reader,
             emBuilder.Types,
-            emBuilder.Globals,
-            [(Constants.Globals.PrecodeStubManagerName, TestPrecodeStubManagerName)]);
+            emBuilder.Globals);
 
         IContractFactory<IStubCodeName> stubCodeNameFactory = new StubCodeNameFactory();
         Mock<ContractRegistry> reg = new();
@@ -67,10 +73,10 @@ public class StubCodeNameTests
     {
         MockDescriptors.ExecutionManager emBuilder = new(version, arch, MockDescriptors.ExecutionManager.DefaultAllocationRange);
 
-        // Set up a RangeList (precode) range section.
+        // Set up a RangeList (precode) range section with STUB_CODE_BLOCK_STUBPRECODE.
         TargetPointer jitManagerAddress = new(0x000b_ff00);
         MockDescriptors.ExecutionManager.JittedCodeRange precodeRange = emBuilder.AllocateJittedCodeRange(PrecodeRangeStart, PrecodeRangeSize);
-        TargetPointer rangeSectionAddress = emBuilder.AddRangeListRangeSection(precodeRange, jitManagerAddress);
+        TargetPointer rangeSectionAddress = emBuilder.AddRangeListRangeSection(precodeRange, jitManagerAddress, StubCodeBlock_StubPrecode);
         _ = emBuilder.AddRangeSectionFragment(precodeRange, rangeSectionAddress);
 
         TargetCodePointer stubAddress = new TargetCodePointer(PrecodeRangeStart + 0x100);
@@ -83,6 +89,54 @@ public class StubCodeNameTests
 
         Assert.True(found);
         Assert.Equal(StubManagerKind.Precode, kind);
-        Assert.Equal(TestPrecodeStubManagerName, managerName);
+        Assert.Equal("MethodDescPrestub", managerName);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void TryGetStubTypeAndName_StubLinkRangeSection_ReturnsStubLinkKind(int version, MockTarget.Architecture arch)
+    {
+        MockDescriptors.ExecutionManager emBuilder = new(version, arch, MockDescriptors.ExecutionManager.DefaultAllocationRange);
+
+        TargetPointer jitManagerAddress = new(0x000b_ff00);
+        MockDescriptors.ExecutionManager.JittedCodeRange range = emBuilder.AllocateJittedCodeRange(PrecodeRangeStart, PrecodeRangeSize);
+        TargetPointer rangeSectionAddress = emBuilder.AddRangeListRangeSection(range, jitManagerAddress, StubCodeBlock_StubLink);
+        _ = emBuilder.AddRangeSectionFragment(range, rangeSectionAddress);
+
+        TargetCodePointer stubAddress = new TargetCodePointer(PrecodeRangeStart + 0x200);
+
+        var target = CreateTarget(emBuilder);
+        var stubCodeName = target.Contracts.StubCodeName;
+
+        bool found = stubCodeName.TryGetStubTypeAndName(
+            stubAddress, out StubManagerKind kind, out string? managerName);
+
+        Assert.True(found);
+        Assert.Equal(StubManagerKind.StubLink, kind);
+        Assert.Equal("StubLinkStub", managerName);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllVersions))]
+    public void TryGetStubTypeAndName_VsdDispatchRangeSection_ReturnsRangeSectionKind(int version, MockTarget.Architecture arch)
+    {
+        MockDescriptors.ExecutionManager emBuilder = new(version, arch, MockDescriptors.ExecutionManager.DefaultAllocationRange);
+
+        TargetPointer jitManagerAddress = new(0x000b_ff00);
+        MockDescriptors.ExecutionManager.JittedCodeRange range = emBuilder.AllocateJittedCodeRange(PrecodeRangeStart, PrecodeRangeSize);
+        TargetPointer rangeSectionAddress = emBuilder.AddRangeListRangeSection(range, jitManagerAddress, StubCodeBlock_VsdDispatchStub);
+        _ = emBuilder.AddRangeSectionFragment(range, rangeSectionAddress);
+
+        TargetCodePointer stubAddress = new TargetCodePointer(PrecodeRangeStart + 0x300);
+
+        var target = CreateTarget(emBuilder);
+        var stubCodeName = target.Contracts.StubCodeName;
+
+        bool found = stubCodeName.TryGetStubTypeAndName(
+            stubAddress, out StubManagerKind kind, out string? managerName);
+
+        Assert.True(found);
+        Assert.Equal(StubManagerKind.RangeSection, kind);
+        Assert.Equal("VSD_DispatchStub", managerName);
     }
 }

@@ -79,6 +79,12 @@ public static class Constants
         public const string EEJitManagerAddress = nameof(EEJitManagerAddress);
         public const string StubCodeBlockLast = nameof(StubCodeBlockLast);
         public const string PrecodeStubManagerName = nameof(PrecodeStubManagerName);
+        public const string ThePreStubEntryPoint = nameof(ThePreStubEntryPoint);
+        public const string InteropDispatchStubGenericPInvokeCalliHelper = nameof(InteropDispatchStubGenericPInvokeCalliHelper);
+        public const string InteropDispatchStubVarargPInvokeStub = nameof(InteropDispatchStubVarargPInvokeStub);
+        public const string InteropDispatchStubVarargPInvokeStub_RetBuffArg = nameof(InteropDispatchStubVarargPInvokeStub_RetBuffArg);
+        public const string InteropDispatchStubGenericCLRToCOMCallStub = nameof(InteropDispatchStubGenericCLRToCOMCallStub);
+        public const string TailCallStubManagerStubCodeAddress = nameof(TailCallStubManagerStubCodeAddress);
         public const string DefaultADID = nameof(DefaultADID);
         public const string StaticsPointerMask = nameof(StaticsPointerMask);
         public const string PtrArrayOffsetToDataArray = nameof(PtrArrayOffsetToDataArray);

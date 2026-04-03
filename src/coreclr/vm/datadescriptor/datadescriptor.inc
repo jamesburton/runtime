@@ -774,7 +774,13 @@ CDAC_TYPE_FIELD(RangeSection, /*pointer*/, JitManager, cdac_data<RangeSection>::
 CDAC_TYPE_FIELD(RangeSection, /*int32_t*/, Flags, cdac_data<RangeSection>::Flags)
 CDAC_TYPE_FIELD(RangeSection, /*pointer*/, HeapList, cdac_data<RangeSection>::HeapList)
 CDAC_TYPE_FIELD(RangeSection, /*pointer*/, R2RModule, cdac_data<RangeSection>::R2RModule)
+CDAC_TYPE_FIELD(RangeSection, /*pointer*/, RangeList, cdac_data<RangeSection>::RangeList)
 CDAC_TYPE_END(RangeSection)
+
+CDAC_TYPE_BEGIN(CodeRangeMapRangeList)
+CDAC_TYPE_INDETERMINATE(CodeRangeMapRangeList)
+CDAC_TYPE_FIELD(CodeRangeMapRangeList, /*int32_t*/, RangeListKind, cdac_data<CodeRangeMapRangeList>::RangeListKind)
+CDAC_TYPE_END(CodeRangeMapRangeList)
 
 CDAC_TYPE_BEGIN(EEJitManager)
 CDAC_TYPE_INDETERMINATE(EEJitManager)
@@ -1356,6 +1362,22 @@ CDAC_GLOBAL(ArrayBaseSize, uint32, ARRAYBASE_BASESIZE)
 CDAC_GLOBAL(SyncBlockValueToObjectOffset, uint16, OBJHEADER_SIZE - cdac_data<ObjHeader>::SyncBlockValue)
 CDAC_GLOBAL(StubCodeBlockLast, uint8, STUB_CODE_BLOCK_LAST)
 CDAC_GLOBAL_STRING(PrecodeStubManagerName, MethodDescPrestub)
+// Entry-point addresses used by stub managers to identify CLR stubs.
+// These are link-time constants stored directly as nuint values.
+#ifndef FEATURE_PORTABLE_ENTRYPOINTS
+CDAC_GLOBAL(ThePreStubEntryPoint, nuint, (uintptr_t)GetPreStubEntryPoint())
+#endif // !FEATURE_PORTABLE_ENTRYPOINTS
+CDAC_GLOBAL(InteropDispatchStubGenericPInvokeCalliHelper, nuint, (uintptr_t)GetEEFuncEntryPoint(GenericPInvokeCalliHelper))
+CDAC_GLOBAL(InteropDispatchStubVarargPInvokeStub, nuint, (uintptr_t)GetEEFuncEntryPoint(VarargPInvokeStub))
+#if !defined(TARGET_X86) && !defined(TARGET_ARM64) && !defined(TARGET_LOONGARCH64) && !defined(TARGET_RISCV64)
+CDAC_GLOBAL(InteropDispatchStubVarargPInvokeStub_RetBuffArg, nuint, (uintptr_t)GetEEFuncEntryPoint(VarargPInvokeStub_RetBuffArg))
+#endif
+#ifdef FEATURE_COMINTEROP
+CDAC_GLOBAL(InteropDispatchStubGenericCLRToCOMCallStub, nuint, (uintptr_t)GetEEFuncEntryPoint(GenericCLRToCOMCallStub))
+#endif // FEATURE_COMINTEROP
+#if defined(TARGET_X86) && !defined(UNIX_X86_ABI)
+CDAC_GLOBAL(TailCallStubManagerStubCodeAddress, nuint, (uintptr_t)GetEEFuncEntryPoint(JIT_TailCall))
+#endif // TARGET_X86 && !UNIX_X86_ABI
 CDAC_GLOBAL(DefaultADID, uint32, DefaultADID)
 #ifndef TARGET_UNIX
 CDAC_GLOBAL(SizeOfGenericModeBlock, uint32, sizeof(GenericModeBlock))

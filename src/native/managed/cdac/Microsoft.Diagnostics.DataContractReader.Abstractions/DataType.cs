@@ -103,6 +103,7 @@ public enum DataType
     RangeSectionMap,
     RangeSectionFragment,
     RangeSection,
+    CodeRangeMapRangeList,
     RealCodeHeader,
     CodeHeapListNode,
     MethodDescVersioningState,

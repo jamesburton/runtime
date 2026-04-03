@@ -210,6 +210,16 @@ internal partial class MockDescriptors
                 new(nameof(Data.RangeSection.Flags), DataType.int32),
                 new(nameof(Data.RangeSection.HeapList), DataType.pointer),
                 new(nameof(Data.RangeSection.R2RModule), DataType.pointer),
+                new(nameof(Data.RangeSection.RangeList), DataType.pointer),
+            ]
+        };
+
+        private static readonly MockDescriptors.TypeFields CodeRangeMapRangeListFields = new()
+        {
+            DataType = DataType.CodeRangeMapRangeList,
+            Fields =
+            [
+                new(nameof(Data.CodeRangeMapRangeList.RangeListKind), DataType.int32),
             ]
         };
 
@@ -303,6 +313,7 @@ internal partial class MockDescriptors
                     RangeSectionMapFields,
                     RangeSectionFragmentFields,
                     RangeSectionFields,
+                    CodeRangeMapRangeListFields,
                     CodeHeapListNodeFields,
                     RealCodeHeaderFields,
                     ReadyToRunInfoFields(Builder.TargetTestHelpers),
@@ -389,8 +400,19 @@ internal partial class MockDescriptors
         /// Adds a range section with the <c>RangeList</c> flag set (0x04), used for precode and
         /// other stub range sections.
         /// </summary>
-        public TargetPointer AddRangeListRangeSection(JittedCodeRange jittedCodeRange, TargetPointer jitManagerAddress)
+        /// <param name="rangeListKind">
+        /// The <c>StubCodeBlockKind</c> to store in the associated <c>CodeRangeMapRangeList</c>.
+        /// Defaults to 4 (STUB_CODE_BLOCK_STUBPRECODE).
+        /// </param>
+        public TargetPointer AddRangeListRangeSection(JittedCodeRange jittedCodeRange, TargetPointer jitManagerAddress, int rangeListKind = 4 /* STUB_CODE_BLOCK_STUBPRECODE */)
         {
+            // Allocate and populate the CodeRangeMapRangeList object.
+            var rangeListTypeInfo = Types[DataType.CodeRangeMapRangeList];
+            MockMemorySpace.HeapFragment rangeListFragment = _rangeSectionMapAllocator.Allocate(rangeListTypeInfo.Size.Value, "CodeRangeMapRangeList");
+            Builder.AddHeapFragment(rangeListFragment);
+            Span<byte> rl = Builder.BorrowAddressRange(rangeListFragment.Address, (int)rangeListTypeInfo.Size.Value);
+            Builder.TargetTestHelpers.Write(rl.Slice(rangeListTypeInfo.Fields[nameof(Data.CodeRangeMapRangeList.RangeListKind)].Offset, sizeof(int)), rangeListKind);
+
             var tyInfo = Types[DataType.RangeSection];
             uint rangeSectionSize = tyInfo.Size.Value;
             MockMemorySpace.HeapFragment rangeSection = _rangeSectionMapAllocator.Allocate(rangeSectionSize, "RangeSection (RangeList)");
@@ -402,6 +424,7 @@ internal partial class MockDescriptors
             // 0x04 = RangeSectionFlags.RangeList
             Builder.TargetTestHelpers.Write(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.Flags)].Offset, sizeof(uint)), (uint)0x04);
             Builder.TargetTestHelpers.WritePointer(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.JitManager)].Offset, pointerSize), jitManagerAddress);
+            Builder.TargetTestHelpers.WritePointer(rs.Slice(tyInfo.Fields[nameof(Data.RangeSection.RangeList)].Offset, pointerSize), rangeListFragment.Address);
 
             return rangeSection.Address;
         }

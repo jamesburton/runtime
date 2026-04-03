@@ -179,6 +179,13 @@ private:
     SArray<TADDR> _starts;
     void* _id;
     bool _collectible;
+
+    friend struct ::cdac_data<CodeRangeMapRangeList>;
+};
+
+template<> struct cdac_data<CodeRangeMapRangeList>
+{
+    static constexpr size_t RangeListKind = offsetof(CodeRangeMapRangeList, _rangeListType);
 };
 
 // Iterator over a DomainAssembly in the same ALC

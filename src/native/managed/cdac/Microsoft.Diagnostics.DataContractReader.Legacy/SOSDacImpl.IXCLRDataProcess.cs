@@ -133,6 +133,7 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                 if (displacement is not null)
                     *displacement = 0;
 
+                bool nameFormatted = false;
                 if (kind == StubManagerKind.Precode)
                 {
                     // Mirror the native RawGetMethodName loop: walk backwards through the
@@ -164,7 +165,8 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                                 *displacement = address.Value - possibleEntry.ToAddress(_target).Value;
 
                             hr = FormatMethodName(_target, rts, methodDescHandle, address, bufLen, nameLen, nameBuf);
-                            goto DoneWithPrecode;
+                            nameFormatted = true;
+                            break;
                         }
                         catch (InvalidOperationException)
                         {
@@ -173,10 +175,12 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                     }
                 }
 
-                // Fallback for all stub kinds (or when the precode loop found no valid MethodDesc):
-                // format as a CLR stub using the manager name.
-                hr = FormatCLRStubName(managerName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
-                DoneWithPrecode:;
+                if (!nameFormatted)
+                {
+                    // Fallback for all stub kinds (or when the precode loop found no valid MethodDesc):
+                    // format as a CLR stub using the manager name.
+                    hr = FormatCLRStubName(managerName, new TargetPointer(codeAddress.Value), bufLen, nameLen, nameBuf);
+                }
             }
             // Step 3: check whether the address is a JIT helper (auxiliary symbol).
             else if (auxSymbols.TryGetAuxiliarySymbolName(new TargetPointer(codeAddress.Value), out string? helperName))
@@ -185,7 +189,7 @@ public sealed unsafe partial class SOSDacImpl : IXCLRDataProcess, IXCLRDataProce
                     *displacement = 0;
 
                 OutputBufferHelpers.CopyStringToBuffer(nameBuf, bufLen, nameLen, helperName);
-                hr = bufLen < (helperName.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
+                hr = bufLen < (uint)(helperName.Length + 1) ? HResults.S_FALSE : HResults.S_OK;
             }
             else
             {

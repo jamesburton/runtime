@@ -9,6 +9,8 @@ namespace Microsoft.Diagnostics.DataContractReader.Contracts;
 /// </summary>
 public enum StubManagerKind
 {
+    /// <summary>The address is ThePreStub (ThePreStubManager). The manager name is <c>"ThePreStub"</c>.</summary>
+    ThePreStub,
     /// <summary>A precode stub (PrecodeStubManager). The manager name is typically <c>"MethodDescPrestub"</c>.</summary>
     Precode,
     /// <summary>A stub-link stub, such as a multicast delegate stub (StubLinkStubManager).</summary>
@@ -21,9 +23,9 @@ public enum StubManagerKind
     ILStub,
     /// <summary>A P/Invoke thunk stub (PInvokeILStubManager).</summary>
     PInvoke,
-    /// <summary>An interop dispatch stub (InteropDispatchStubManager).</summary>
+    /// <summary>An interop dispatch stub (InteropDispatchStubManager): CLR-to-COM, vararg P/Invoke, or generic P/Invoke calli.</summary>
     InteropDispatch,
-    /// <summary>A tail-call stub (TailCallStubManager).</summary>
+    /// <summary>A tail-call stub (TailCallStubManager, x86 only).</summary>
     TailCall,
 }
 
