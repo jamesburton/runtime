@@ -428,10 +428,9 @@ BEGIN
 
     IDS_EE_MISSING_FIELD                    "Field not found: '%1'."
     IDS_EE_MISSING_METHOD                   "Method not found: '%1'."
-    IDS_EE_MISSING_METHOD_DETAIL_BYTE_ARRAY "Method not found: '%1'. The containing assembly '%2' was loaded in the context '%3' from a byte array."
-    IDS_EE_MISSING_METHOD_DETAIL_LOCATION   "Method not found: '%1'. The containing assembly '%2' was loaded in the context '%3' at location '%4'."
-    IDS_EE_MISSING_FIELD_DETAIL_BYTE_ARRAY  "Field not found: '%1'. The containing assembly '%2' was loaded in the context '%3' from a byte array."
-    IDS_EE_MISSING_FIELD_DETAIL_LOCATION    "Field not found: '%1'. The containing assembly '%2' was loaded in the context '%3' at location '%4'."
+    IDS_EE_MISSING_METHOD_ALC_DETAIL        "Method not found: '%1'. The method's signature references types from %2, but the target type exists in %3."
+    IDS_EE_MISSING_MEMBER_ALC_BYTE_ARRAY    "assembly '%1' in the context '%2' loaded from a byte array"
+    IDS_EE_MISSING_MEMBER_ALC_LOCATION      "assembly '%1' in the context '%2' at location '%3'"
 
     IDS_EE_NO_IINSPECTABLE                  "Marshalling as IInspectable is not supported in the .NET runtime."
     IDS_EE_NO_BACKING_CLASS_FACTORY         "An instance of the __ComObject type cannot be created unless the type has been obtained using GetTypeFromProgID or GetTypeFromCLSID."

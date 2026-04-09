@@ -77,39 +77,42 @@ void DECLSPEC_NORETURN MemberLoader::ThrowMissingFieldException(MethodTable* pMT
     MAKE_FULLY_QUALIFIED_MEMBER_NAME(szFullName, NULL, szClassName, (szMember?szMember:"?"), "");
     _ASSERTE(szFullName!=NULL);
     MAKE_WIDEPTR_FROMUTF8(szwFullName, szFullName);
+    EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_MISSING_FIELD, szwFullName));
+}
 
-    if (pMT != NULL)
+// Builds an ALC detail string for a given PEAssembly, e.g.:
+// "assembly 'Foo, Version=1.0.0.0' in the context 'Default' at location '/path/to/Foo.dll'"
+// "assembly 'Foo, Version=1.0.0.0' in the context 'TestALC' loaded from a byte array"
+static void GetMemberAlcDetailInfo(PEAssembly *pPEAssembly, SString &sDetail)
+{
+    STANDARD_VM_CONTRACT;
+
+    SString sAlcName;
+    pPEAssembly->GetAssemblyBinder()->GetNameForDiagnostics(sAlcName);
+    SString sAssemblyDisplayName;
+    pPEAssembly->GetDisplayName(sAssemblyDisplayName);
+    SString assemblyPath{ pPEAssembly->GetPath() };
+
+    SString resStr;
+    SString formatted;
+    if (assemblyPath.IsEmpty())
     {
-        PEAssembly *pPEAssembly = pMT->GetModule()->GetPEAssembly();
-        SString sAlcName;
-        pPEAssembly->GetAssemblyBinder()->GetNameForDiagnostics(sAlcName);
-        SString sAssemblyDisplayName;
-        pPEAssembly->GetDisplayName(sAssemblyDisplayName);
-        SString assemblyPath{ pPEAssembly->GetPath() };
-
-        SString resStr;
-        SString formatted;
-        if (assemblyPath.IsEmpty())
+        if (resStr.LoadResource(IDS_EE_MISSING_MEMBER_ALC_BYTE_ARRAY))
         {
-            if (resStr.LoadResource(IDS_EE_MISSING_FIELD_DETAIL_BYTE_ARRAY))
-            {
-                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
-                                        SString{ SString::Utf8, szFullName }, sAssemblyDisplayName, sAlcName);
-                EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_GENERIC, formatted.GetUnicode()));
-            }
-        }
-        else
-        {
-            if (resStr.LoadResource(IDS_EE_MISSING_FIELD_DETAIL_LOCATION))
-            {
-                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
-                                        SString{ SString::Utf8, szFullName }, sAssemblyDisplayName, sAlcName, assemblyPath);
-                EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_GENERIC, formatted.GetUnicode()));
-            }
+            formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                    sAssemblyDisplayName, sAlcName);
+            sDetail.Append(formatted);
         }
     }
-
-    EX_THROW(EEMessageException, (kMissingFieldException, IDS_EE_MISSING_FIELD, szwFullName));
+    else
+    {
+        if (resStr.LoadResource(IDS_EE_MISSING_MEMBER_ALC_LOCATION))
+        {
+            formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                    sAssemblyDisplayName, sAlcName, assemblyPath);
+            sDetail.Append(formatted);
+        }
+    }
 }
 
 void DECLSPEC_NORETURN MemberLoader::ThrowMissingMethodException(MethodTable* pMT, LPCSTR szMember, ModuleBase *pModule, PCCOR_SIGNATURE pSig,DWORD cSig,const SigTypeContext *pTypeContext)
@@ -153,32 +156,32 @@ void DECLSPEC_NORETURN MemberLoader::ThrowMissingMethodException(MethodTable* pM
         sMemberName.Printf("%s.%s", szClassName, szMember);
     }
 
-    if (pMT != NULL)
+    // When both the calling module (pModule) and target type (pMT) are available,
+    // include their assembly/ALC context in the message. The typical ALC mismatch
+    // scenario is that the method signature in pModule references parameter or return
+    // types from one ALC, while the target type in pMT has methods whose signatures
+    // reference those same-named types from a different ALC, causing the method
+    // lookup to fail.
+    if (pModule != NULL && pModule->IsFullModule() && pMT != NULL)
     {
-        PEAssembly *pPEAssembly = pMT->GetModule()->GetPEAssembly();
-        SString sAlcName;
-        pPEAssembly->GetAssemblyBinder()->GetNameForDiagnostics(sAlcName);
-        SString sAssemblyDisplayName;
-        pPEAssembly->GetDisplayName(sAssemblyDisplayName);
-        SString assemblyPath{ pPEAssembly->GetPath() };
+        Module *pCallerModule = static_cast<Module*>(pModule);
+        PEAssembly *pCallerPEAssembly = pCallerModule->GetPEAssembly();
+        PEAssembly *pTargetPEAssembly = pMT->GetModule()->GetPEAssembly();
 
-        SString resStr;
-        SString formatted;
-        if (assemblyPath.IsEmpty())
+        SString sCallerDetail;
+        GetMemberAlcDetailInfo(pCallerPEAssembly, sCallerDetail);
+
+        SString sTargetDetail;
+        GetMemberAlcDetailInfo(pTargetPEAssembly, sTargetDetail);
+
+        if (!sCallerDetail.IsEmpty() && !sTargetDetail.IsEmpty())
         {
-            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_DETAIL_BYTE_ARRAY))
+            SString resStr;
+            SString formatted;
+            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_ALC_DETAIL))
             {
                 formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
-                                        sMemberName, sAssemblyDisplayName, sAlcName);
-                EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_GENERIC, formatted.GetUnicode()));
-            }
-        }
-        else
-        {
-            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_DETAIL_LOCATION))
-            {
-                formatted.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
-                                        sMemberName, sAssemblyDisplayName, sAlcName, assemblyPath);
+                                        sMemberName, sCallerDetail, sTargetDetail);
                 EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_GENERIC, formatted.GetUnicode()));
             }
         }
