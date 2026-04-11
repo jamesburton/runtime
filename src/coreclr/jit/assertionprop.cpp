@@ -2570,6 +2570,136 @@ GenTree* Compiler::optVNBasedFoldExpr_Call_Memmove(GenTreeCall* call)
     return result;
 }
 
+#if FEATURE_HW_INTRINSICS
+//------------------------------------------------------------------------------
+// AllComponentsEitherZeroOrAllBitsSet: Checks whether a value number represents
+// a SIMD value where each component is either zero or all-bits-set.
+//
+// This is VN-based: it inspects the VN of the value to determine if it was produced
+// by a comparison or a logical combination of such values.
+//
+// Arguments:
+//    comp     - Compiler context
+//    vn       - The value number to check
+//    baseType - The expected SIMD element base type (must be integral)
+//
+// Return Value:
+//    true if the VN is known to produce 0/AllBitsSet per element.
+//
+static bool AllComponentsEitherZeroOrAllBitsSet(Compiler* comp, ValueNum vn, var_types baseType)
+{
+    if (vn == ValueNumStore::NoVN)
+    {
+        return false;
+    }
+
+    if (!varTypeIsIntegral(baseType))
+    {
+        // For now, we only support integral types
+        return false;
+    }
+
+    VNFuncApp funcApp;
+    if (!comp->vnStore->GetVNFunc(vn, &funcApp))
+    {
+        return false;
+    }
+
+    // All binary functions have the 3rd argument as the base type
+    if (funcApp.m_arity == 3)
+    {
+        VNFuncApp baseTypeFuncApp;
+        if (!comp->vnStore->GetVNFunc(funcApp.m_args[2], &baseTypeFuncApp) ||
+            (baseTypeFuncApp.m_func != VNF_SimdType) || (baseTypeFuncApp.m_arity != 2) ||
+            !comp->vnStore->IsVNInt32Constant(baseTypeFuncApp.m_args[1]))
+        {
+            return false;
+        }
+
+        // NOTE: we can be less conservative and allow wider base types for arguments
+        // For now, we require an exact match.
+        if (baseType != static_cast<var_types>(comp->vnStore->GetConstantInt32(baseTypeFuncApp.m_args[1])))
+        {
+            return false;
+        }
+    }
+
+    // Check if this VN was produced by a HW intrinsic
+    if (funcApp.m_func < VNF_HWI_FIRST || funcApp.m_func > VNF_HWI_LAST)
+    {
+        return false;
+    }
+
+    bool           isScalar;
+    NamedIntrinsic ni = static_cast<NamedIntrinsic>(funcApp.m_func - VNF_HWI_FIRST + NI_HW_INTRINSIC_START + 1);
+    genTreeOps     op = GenTreeHWIntrinsic::GetOperForHWIntrinsicId(ni, baseType, &isScalar);
+
+    if (isScalar)
+    {
+        return false;
+    }
+
+    switch (op)
+    {
+        case GT_EQ:
+        case GT_NE:
+        case GT_GT:
+        case GT_GE:
+        case GT_LE:
+        case GT_LT:
+            return true;
+
+        case GT_OR:
+        case GT_AND:
+        case GT_XOR:
+            return AllComponentsEitherZeroOrAllBitsSet(comp, funcApp.m_args[0], baseType) &&
+                   AllComponentsEitherZeroOrAllBitsSet(comp, funcApp.m_args[1], baseType);
+
+        default:
+            return false;
+    }
+}
+
+//------------------------------------------------------------------------------
+// optVNBasedFoldExpr_HWIntrinsic: Folds given HWIntrinsic using VN to a simpler tree.
+//
+// Arguments:
+//    block  -  The block containing the tree.
+//    parent -  The parent node of the tree.
+//    hw     -  The HWIntrinsic to fold
+//
+// Return Value:
+//    Returns a new tree or nullptr if nothing is changed.
+//
+GenTree* Compiler::optVNBasedFoldExpr_HWIntrinsic(BasicBlock* block, GenTree* parent, GenTreeHWIntrinsic* hw)
+{
+    // Only ARM64 benefits from this optimization at the moment.
+#if TARGET_ARM64
+    if (hw->OperIsHWIntrinsic(NI_Vector128_IndexOfWhereAllBitsSet) ||
+        hw->OperIsHWIntrinsic(NI_Vector128_LastIndexOfWhereAllBitsSet))
+    {
+        var_types baseType  = hw->GetSimdBaseType();
+        auto      vnVisitor = [this, baseType](ValueNum vn) -> ValueNumStore::VNVisit {
+            if (AllComponentsEitherZeroOrAllBitsSet(this, vn, baseType))
+            {
+                return ValueNumStore::VNVisit::Continue;
+            }
+            return ValueNumStore::VNVisit::Abort;
+        };
+
+        ValueNum vn = optConservativeNormalVN(hw->Op(1));
+        if (vnStore->VNVisitReachingVNs(vn, vnVisitor) == ValueNumStore::VNVisit::Continue)
+        {
+            hw->gtFlags |= GTF_HW_INPUT_ZERO_OR_ALLBITS;
+            return hw;
+        }
+    }
+#endif
+
+    return nullptr;
+}
+#endif
+
 //------------------------------------------------------------------------------
 // optVNBasedFoldExpr_Call: Folds given call using VN to a simpler tree.
 //
@@ -2679,6 +2809,11 @@ GenTree* Compiler::optVNBasedFoldExpr(BasicBlock* block, GenTree* parent, GenTre
     {
         case GT_CALL:
             return optVNBasedFoldExpr_Call(block, parent, tree->AsCall());
+
+#if FEATURE_HW_INTRINSICS
+        case GT_HWINTRINSIC:
+            return optVNBasedFoldExpr_HWIntrinsic(block, parent, tree->AsHWIntrinsic());
+#endif
 
             // We can add more VN-based foldings here.
 

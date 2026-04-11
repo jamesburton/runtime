@@ -605,6 +605,15 @@ void Rationalizer::RewriteHWIntrinsic(GenTree** use, Compiler::GenTreeStack& par
             break;
         }
 
+#if defined(TARGET_ARM64)
+        case NI_Vector128_IndexOfWhereAllBitsSet:
+        case NI_Vector128_LastIndexOfWhereAllBitsSet:
+        {
+            RewriteHWIntrinsicIndexOfWhereAllBitsSet(use, parents);
+            break;
+        }
+#endif // TARGET_ARM64
+
         default:
         {
             break;
@@ -1582,8 +1591,174 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
 }
 #endif // FEATURE_HW_INTRINSICS
 
+#if defined(FEATURE_HW_INTRINSICS) && defined(TARGET_ARM64)
+//----------------------------------------------------------------------------------------------
+// RewriteHWIntrinsicIndexOfWhereAllBitsSet: Rewrites Vector128.IndexOfWhereAllBitsSet and
+// Vector128.LastIndexOfWhereAllBitsSet using the SHRN trick when the input is known to be
+// 0 or AllBitsSet per element.
+//
+// Uses SHRN to produce a nibble-packed 64-bit mask, then CTZ/CLZ to find the element index.
+//
+void Rationalizer::RewriteHWIntrinsicIndexOfWhereAllBitsSet(GenTree** use, Compiler::GenTreeStack& parents)
+{
+    GenTreeHWIntrinsic* node = (*use)->AsHWIntrinsic();
+
+    NamedIntrinsic intrinsicId  = node->GetHWIntrinsicId();
+    var_types      simdBaseType = node->GetSimdBaseType();
+    unsigned       simdSize     = node->GetSimdSize();
+    bool           isLastIndex  = (intrinsicId == NI_Vector128_LastIndexOfWhereAllBitsSet);
+
+    GenTree* op1 = node->Op(1);
+
+    assert(!varTypeIsFloating(simdBaseType));
+    assert(simdSize == 16);
+
+    // SHRN narrows each wider element by shifting right, producing non-zero nibbles
+    // for set elements. Result is a 64-bit nibble-packed mask.
+    //
+    // Algorithm:
+    //   mask = SHRN(input.AsWiderType(), shiftAmount).AsUInt64().ToScalar()
+    //   idx  = (isLastIndex ? (63 - CLZ64(mask)) : CTZ64(mask)) >> ctzDivisorLog2
+    //   result = mask == 0 ? -1 : idx
+
+    var_types shrnBaseType;
+    int       shiftAmount;
+    int       ctzDivisorLog2;
+
+    switch (simdBaseType)
+    {
+        case TYP_BYTE:
+        case TYP_UBYTE:
+            shrnBaseType   = TYP_UBYTE;
+            shiftAmount    = 4;
+            ctzDivisorLog2 = 2; // / 4
+            break;
+        case TYP_SHORT:
+        case TYP_USHORT:
+            shrnBaseType   = TYP_UBYTE;
+            shiftAmount    = 4;
+            ctzDivisorLog2 = 3; // / 8
+            break;
+        case TYP_INT:
+        case TYP_UINT:
+            shrnBaseType   = TYP_USHORT;
+            shiftAmount    = 8;
+            ctzDivisorLog2 = 4; // / 16
+            break;
+        case TYP_LONG:
+        case TYP_ULONG:
+            shrnBaseType   = TYP_UINT;
+            shiftAmount    = 16;
+            ctzDivisorLog2 = 5; // / 32
+            break;
+        default:
+            unreached();
+    }
+
+    // For short/ushort: first narrow to byte via SHRN(ushort→byte, #4), then
+    // apply the byte SHRN path. Each result byte is 0x00 or 0x0F, one per short element.
+    if (varTypeIsShort(simdBaseType))
+    {
+        GenTree* shiftIcon1 = m_compiler->gtNewIconNode(4);
+        BlockRange().InsertAfter(op1, shiftIcon1);
+
+        op1 = m_compiler->gtNewSimdHWIntrinsicNode(TYP_SIMD8, op1, shiftIcon1,
+                                                   NI_AdvSimd_ShiftRightLogicalNarrowingLower, TYP_UBYTE, 8);
+        BlockRange().InsertAfter(shiftIcon1, op1);
+
+        // 8 bytes in Vector64, extract as u64 directly
+        node->gtType = TYP_LONG;
+        node->ChangeHWIntrinsicId(NI_Vector64_ToScalar);
+        node->SetSimdSize(8);
+        node->SetSimdBaseType(TYP_ULONG);
+        node->Op(1) = op1;
+    }
+    else
+    {
+        // Single SHRN for byte/int/long
+        GenTree* shiftIcon = m_compiler->gtNewIconNode(shiftAmount);
+        BlockRange().InsertAfter(op1, shiftIcon);
+
+        GenTree* shrn =
+            m_compiler->gtNewSimdHWIntrinsicNode(TYP_SIMD8, op1, shiftIcon, NI_AdvSimd_ShiftRightLogicalNarrowingLower,
+                                                 shrnBaseType, 8);
+        BlockRange().InsertAfter(shiftIcon, shrn);
+
+        node->gtType = TYP_LONG;
+        node->ChangeHWIntrinsicId(NI_Vector64_ToScalar);
+        node->SetSimdSize(8);
+        node->SetSimdBaseType(TYP_ULONG);
+        node->Op(1) = shrn;
+    }
+
+    // Store mask in temp (needed for both bit-scan and SELECT condition)
+    LIR::Use maskUse;
+    LIR::Use::MakeDummyUse(BlockRange(), node, &maskUse);
+    maskUse.ReplaceWithLclVar(m_compiler);
+    GenTree* maskLcl = maskUse.Def();
+
+    GenTree* idx;
+
+    if (isLastIndex)
+    {
+        // (63 - CLZ64(mask)) >> ctzDivisorLog2
+        GenTree* clz = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, maskLcl, NI_ArmBase_Arm64_LeadingZeroCount);
+        BlockRange().InsertAfter(maskLcl, clz);
+
+        GenTree* icon63 = m_compiler->gtNewIconNode(63);
+        BlockRange().InsertAfter(clz, icon63);
+
+        GenTree* sub = m_compiler->gtNewOperNode(GT_SUB, TYP_INT, icon63, clz);
+        BlockRange().InsertAfter(icon63, sub);
+
+        GenTree* divIcon = m_compiler->gtNewIconNode(ctzDivisorLog2);
+        BlockRange().InsertAfter(sub, divIcon);
+
+        idx = m_compiler->gtNewOperNode(GT_RSZ, TYP_INT, sub, divIcon);
+        BlockRange().InsertAfter(divIcon, idx);
+    }
+    else
+    {
+        // CTZ64(mask) >> ctzDivisorLog2 where CTZ64 = RBIT + CLZ
+        GenTree* rbit = m_compiler->gtNewScalarHWIntrinsicNode(TYP_LONG, maskLcl, NI_ArmBase_Arm64_ReverseElementBits);
+        BlockRange().InsertAfter(maskLcl, rbit);
+
+        GenTree* clz = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, rbit, NI_ArmBase_Arm64_LeadingZeroCount);
+        BlockRange().InsertAfter(rbit, clz);
+
+        GenTree* divIcon = m_compiler->gtNewIconNode(ctzDivisorLog2);
+        BlockRange().InsertAfter(clz, divIcon);
+
+        idx = m_compiler->gtNewOperNode(GT_RSZ, TYP_INT, clz, divIcon);
+        BlockRange().InsertAfter(divIcon, idx);
+    }
+
+    // GT_SELECT: mask != 0 ? idx : -1
+    GenTree* maskCond = m_compiler->gtClone(maskLcl);
+    BlockRange().InsertAfter(idx, maskCond);
+
+    GenTree* minus1 = m_compiler->gtNewIconNode(-1, TYP_INT);
+    BlockRange().InsertAfter(maskCond, minus1);
+
+    GenTreeConditional* select = m_compiler->gtNewConditionalNode(GT_SELECT, maskCond, idx, minus1, TYP_INT);
+    BlockRange().InsertAfter(minus1, select);
+
+    if (parents.Height() > 1)
+    {
+        parents.Top(1)->ReplaceOperand(use, select);
+    }
+    else
+    {
+        *use = select;
+    }
+
+    assert(parents.Top() == node);
+    (void)parents.Pop();
+    parents.Push(select);
+}
+#endif // FEATURE_HW_INTRINSICS && TARGET_ARM64
+
 #ifdef TARGET_ARM64
-// RewriteSubLshDiv: Possibly rewrite a SubLshDiv node into a Mod.
 //
 // Arguments:
 //    use - A use of a node.
