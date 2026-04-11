@@ -609,7 +609,14 @@ void Rationalizer::RewriteHWIntrinsic(GenTree** use, Compiler::GenTreeStack& par
         case NI_Vector128_IndexOfWhereAllBitsSet:
         case NI_Vector128_LastIndexOfWhereAllBitsSet:
         {
-            RewriteHWIntrinsicIndexOfWhereAllBitsSet(use, parents);
+            if (node->gtFlags & GTF_HW_INPUT_ZERO_OR_ALLBITS)
+            {
+                RewriteHWIntrinsicIndexOfWhereAllBitsSet(use, parents);
+            }
+            else
+            {
+                RewriteHWIntrinsicIndexOfWhereAllBitsSetGeneric(use, parents);
+            }
             break;
         }
 #endif // TARGET_ARM64
@@ -1290,30 +1297,22 @@ bool Rationalizer::ShouldRewriteToNonMaskHWIntrinsic(GenTree* node)
 }
 #endif // TARGET_XARCH
 
+#if defined(TARGET_ARM64)
 //----------------------------------------------------------------------------------------------
-// RewriteHWIntrinsicExtractMsb: Rewrites a hwintrinsic ExtractMostSignificantBytes operation
+// ExpandExtractMostSignificantBitsArm64: Builds the ARM64 "mask + shift + horizontal sum"
+// sequence for ExtractMostSignificantBits. Returns the final SIMD node ready for ToScalar.
 //
 // Arguments:
-//    use     - A pointer to the hwintrinsic node
-//    parents - A reference to tree walk data providing the context
+//    op1          - The input SIMD vector node (already in LIR)
+//    simdBaseType - [in/out] Updated to effective type after normalization
+//    simdSize     - The SIMD size (8 or 16)
 //
-void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTreeStack& parents)
+// Return Value:
+//    The final SIMD node (horizontal sum result), ready for ToScalar extraction.
+//
+GenTree* Rationalizer::ExpandExtractMostSignificantBitsArm64(GenTree* op1, var_types& simdBaseType, unsigned simdSize)
 {
-    GenTreeHWIntrinsic* node = (*use)->AsHWIntrinsic();
-
-    NamedIntrinsic intrinsic    = node->GetHWIntrinsicId();
-    var_types      simdBaseType = node->GetSimdBaseType();
-    unsigned       simdSize     = node->GetSimdSize();
-    var_types      simdType     = Compiler::getSIMDTypeForSize(simdSize);
-
-    GenTree* op1 = node->Op(1);
-
-#if defined(TARGET_ARM64)
-    // ARM64 doesn't have a single instruction that performs the behavior so we'll emulate it instead.
-    // To do this, we effectively perform the following steps:
-    // 1. tmp = input & 0x80         ; and the input to clear all but the most significant bit
-    // 2. tmp = tmp >> index         ; right shift each element by its index
-    // 3. tmp = sum(tmp)             ; sum the elements together
+    var_types simdType = Compiler::getSIMDTypeForSize(simdSize);
 
     GenTreeVecCon* vecCon2 = m_compiler->gtNewVconNode(simdType);
     GenTreeVecCon* vecCon3 = m_compiler->gtNewVconNode(simdType);
@@ -1323,11 +1322,9 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
         case TYP_BYTE:
         case TYP_UBYTE:
         {
-            simdBaseType = TYP_UBYTE;
-
+            simdBaseType              = TYP_UBYTE;
             vecCon2->gtSimdVal.u64[0] = 0x8080808080808080;
             vecCon3->gtSimdVal.u64[0] = 0x00FFFEFDFCFBFAF9;
-
             if (simdSize == 16)
             {
                 vecCon2->gtSimdVal.u64[1] = 0x8080808080808080;
@@ -1335,15 +1332,12 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
             }
             break;
         }
-
         case TYP_SHORT:
         case TYP_USHORT:
         {
-            simdBaseType = TYP_USHORT;
-
+            simdBaseType              = TYP_USHORT;
             vecCon2->gtSimdVal.u64[0] = 0x8000800080008000;
             vecCon3->gtSimdVal.u64[0] = 0xFFF4FFF3FFF2FFF1;
-
             if (simdSize == 16)
             {
                 vecCon2->gtSimdVal.u64[1] = 0x8000800080008000;
@@ -1351,16 +1345,13 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
             }
             break;
         }
-
         case TYP_INT:
         case TYP_UINT:
         case TYP_FLOAT:
         {
-            simdBaseType = TYP_INT;
-
+            simdBaseType              = TYP_INT;
             vecCon2->gtSimdVal.u64[0] = 0x8000000080000000;
             vecCon3->gtSimdVal.u64[0] = 0xFFFFFFE2FFFFFFE1;
-
             if (simdSize == 16)
             {
                 vecCon2->gtSimdVal.u64[1] = 0x8000000080000000;
@@ -1368,16 +1359,13 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
             }
             break;
         }
-
         case TYP_LONG:
         case TYP_ULONG:
         case TYP_DOUBLE:
         {
-            simdBaseType = TYP_LONG;
-
+            simdBaseType              = TYP_LONG;
             vecCon2->gtSimdVal.u64[0] = 0x8000000000000000;
             vecCon3->gtSimdVal.u64[0] = 0xFFFFFFFFFFFFFFC1;
-
             if (simdSize == 16)
             {
                 vecCon2->gtSimdVal.u64[1] = 0x8000000000000000;
@@ -1385,11 +1373,8 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
             }
             break;
         }
-
         default:
-        {
             unreached();
-        }
     }
 
     BlockRange().InsertAfter(op1, vecCon2);
@@ -1397,29 +1382,18 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
     BlockRange().InsertAfter(vecCon2, tmp);
     op1 = tmp;
 
-    if ((simdSize == 8) && varTypeIsLong(simdBaseType))
-    {
-        intrinsic = NI_AdvSimd_ShiftLogicalScalar;
-    }
-    else
-    {
-        intrinsic = NI_AdvSimd_ShiftLogical;
-    }
+    NamedIntrinsic shiftIntrinsic =
+        ((simdSize == 8) && varTypeIsLong(simdBaseType)) ? NI_AdvSimd_ShiftLogicalScalar : NI_AdvSimd_ShiftLogical;
 
     BlockRange().InsertAfter(op1, vecCon3);
-    tmp = m_compiler->gtNewSimdHWIntrinsicNode(simdType, op1, vecCon3, intrinsic, simdBaseType, simdSize);
+    tmp = m_compiler->gtNewSimdHWIntrinsicNode(simdType, op1, vecCon3, shiftIntrinsic, simdBaseType, simdSize);
     BlockRange().InsertAfter(vecCon3, tmp);
     op1 = tmp;
 
     if (varTypeIsByte(simdBaseType) && (simdSize == 16))
     {
-        // For byte/sbyte, we also need to handle the fact that we can only shift by up to 8
-        // but for Vector128, we have 16 elements to handle. In that scenario, we will widen
-        // to ushort and combine the lower/upper halves.
-
         LIR::Use op1Use;
         LIR::Use::MakeDummyUse(BlockRange(), op1, &op1Use);
-
         op1Use.ReplaceWithLclVar(m_compiler);
         op1 = op1Use.Def();
 
@@ -1448,15 +1422,12 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
         simdBaseType = TYP_USHORT;
     }
 
-    // Sum the elements
-
     if (!varTypeIsLong(simdBaseType))
     {
         if ((simdSize == 8) && ((simdBaseType == TYP_INT) || (simdBaseType == TYP_UINT)))
         {
             LIR::Use op1Use;
             LIR::Use::MakeDummyUse(BlockRange(), op1, &op1Use);
-
             op1Use.ReplaceWithLclVar(m_compiler);
             op1 = op1Use.Def();
 
@@ -1484,14 +1455,33 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
         op1 = tmp;
     }
 
-    if (simdSize == 8)
-    {
-        intrinsic = NI_Vector64_ToScalar;
-    }
-    else
-    {
-        intrinsic = NI_Vector128_ToScalar;
-    }
+    return op1;
+}
+#endif // TARGET_ARM64
+
+//----------------------------------------------------------------------------------------------
+// RewriteHWIntrinsicExtractMsb: Rewrites a hwintrinsic ExtractMostSignificantBytes operation
+//
+// Arguments:
+//    use     - A pointer to the hwintrinsic node
+//    parents - A reference to tree walk data providing the context
+//
+void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTreeStack& parents)
+{
+    GenTreeHWIntrinsic* node = (*use)->AsHWIntrinsic();
+
+    NamedIntrinsic intrinsic    = node->GetHWIntrinsicId();
+    var_types      simdBaseType = node->GetSimdBaseType();
+    unsigned       simdSize     = node->GetSimdSize();
+    var_types      simdType     = Compiler::getSIMDTypeForSize(simdSize);
+
+    GenTree* op1 = node->Op(1);
+
+#if defined(TARGET_ARM64)
+    op1 = ExpandExtractMostSignificantBitsArm64(op1, simdBaseType, simdSize);
+
+    // The helper always produces a TYP_SIMD8 result, so use NI_Vector64_ToScalar.
+    intrinsic = NI_Vector64_ToScalar;
 
     node->gtType = genActualType(simdBaseType);
     node->ChangeHWIntrinsicId(intrinsic);
@@ -1593,6 +1583,92 @@ void Rationalizer::RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTree
 
 #if defined(FEATURE_HW_INTRINSICS) && defined(TARGET_ARM64)
 //----------------------------------------------------------------------------------------------
+// RewriteHWIntrinsicIndexOfWhereAllBitsSetGeneric: Generic expansion of
+// Vector128.IndexOfWhereAllBitsSet when the input is NOT known to be 0/AllBitsSet per element.
+//
+// Expands to: CmpEq(vector, AllBitsSet) -> ExtractMostSignificantBits -> CTZ -> SELECT
+//
+// Arguments:
+//    use     - A pointer to the hwintrinsic node
+//    parents - A reference to tree walk data providing the context
+//
+void Rationalizer::RewriteHWIntrinsicIndexOfWhereAllBitsSetGeneric(GenTree** use, Compiler::GenTreeStack& parents)
+{
+    GenTreeHWIntrinsic* node = (*use)->AsHWIntrinsic();
+
+    var_types simdBaseType = node->GetSimdBaseType();
+    unsigned  simdSize     = node->GetSimdSize();
+    var_types simdType     = Compiler::getSIMDTypeForSize(simdSize);
+
+    GenTree* op1 = node->Op(1);
+
+    assert(!varTypeIsFloating(simdBaseType));
+
+    // Step 1: Compare vector with AllBitsSet
+    GenTree* allBitsSet = m_compiler->gtNewAllBitsSetConNode(simdType);
+    BlockRange().InsertAfter(op1, allBitsSet);
+
+    GenTree* cmp = m_compiler->gtNewSimdCmpOpNode(GT_EQ, simdType, op1, allBitsSet, simdBaseType, simdSize);
+    BlockRange().InsertAfter(allBitsSet, cmp);
+
+    // Step 2: ExtractMostSignificantBits on the comparison result
+    var_types emsbBaseType = simdBaseType;
+    GenTree*  emsbResult   = ExpandExtractMostSignificantBitsArm64(cmp, emsbBaseType, simdSize);
+
+    // ToScalar - reuse the original node. ExpandExtractMostSignificantBitsArm64 always
+    // produces a TYP_SIMD8 result, so use NI_Vector64_ToScalar.
+    node->gtType = genActualType(emsbBaseType);
+    node->ChangeHWIntrinsicId(NI_Vector64_ToScalar);
+    node->SetSimdSize(8);
+    node->SetSimdBaseType(emsbBaseType);
+    node->Op(1) = emsbResult;
+
+    // Cast to TYP_INT if needed
+    GenTree* emsbInt = static_cast<GenTree*>(node);
+    if ((emsbBaseType != TYP_INT) && (emsbBaseType != TYP_UINT))
+    {
+        emsbInt = m_compiler->gtNewCastNode(TYP_INT, node, /* isUnsigned */ true, TYP_INT);
+        BlockRange().InsertAfter(node, emsbInt);
+    }
+
+    // Step 3: Store EMSB result in temp (needed for both CTZ and SELECT condition)
+    LIR::Use emsbUse;
+    LIR::Use::MakeDummyUse(BlockRange(), emsbInt, &emsbUse);
+    emsbUse.ReplaceWithLclVar(m_compiler);
+    GenTree* emsbLcl = emsbUse.Def();
+
+    // Step 4: CTZ = RBIT + CLZ (TrailingZeroCount)
+    GenTree* rbit = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, emsbLcl, NI_ArmBase_ReverseElementBits);
+    BlockRange().InsertAfter(emsbLcl, rbit);
+
+    GenTree* clz = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, rbit, NI_ArmBase_LeadingZeroCount);
+    BlockRange().InsertAfter(rbit, clz);
+
+    // Step 5: GT_SELECT(emsbResult, ctzResult, -1)
+    GenTree* emsbCond = m_compiler->gtClone(emsbLcl);
+    BlockRange().InsertAfter(clz, emsbCond);
+
+    GenTree* minus1 = m_compiler->gtNewIconNode(-1, TYP_INT);
+    BlockRange().InsertAfter(emsbCond, minus1);
+
+    GenTreeConditional* select = m_compiler->gtNewConditionalNode(GT_SELECT, emsbCond, clz, minus1, TYP_INT);
+    BlockRange().InsertAfter(minus1, select);
+
+    if (parents.Height() > 1)
+    {
+        parents.Top(1)->ReplaceOperand(use, select);
+    }
+    else
+    {
+        *use = select;
+    }
+
+    assert(parents.Top() == node);
+    (void)parents.Pop();
+    parents.Push(select);
+}
+
+//----------------------------------------------------------------------------------------------
 // RewriteHWIntrinsicIndexOfWhereAllBitsSet: Rewrites Vector128.IndexOfWhereAllBitsSet and
 // Vector128.LastIndexOfWhereAllBitsSet using the SHRN trick when the input is known to be
 // 0 or AllBitsSet per element.
@@ -1655,8 +1731,9 @@ void Rationalizer::RewriteHWIntrinsicIndexOfWhereAllBitsSet(GenTree** use, Compi
             unreached();
     }
 
-    // For short/ushort: first narrow to byte via SHRN(ushort→byte, #4), then
-    // apply the byte SHRN path. Each result byte is 0x00 or 0x0F, one per short element.
+    // For short/ushort: narrow from 8 ushort elements to 8 byte elements via SHRN(ushort→byte, #4).
+    // All-bits-set ushort (0xFFFF) >> 4 = 0x0FFF, narrowed to 0xFF; zero stays 0x00.
+    // Result: 8 bytes in Vector64, each 0x00 or 0xFF, extracted as uint64.
     if (varTypeIsShort(simdBaseType))
     {
         GenTree* shiftIcon1 = m_compiler->gtNewIconNode(4);

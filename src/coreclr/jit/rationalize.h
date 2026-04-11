@@ -66,7 +66,9 @@ private:
 
     void RewriteHWIntrinsicExtractMsb(GenTree** use, Compiler::GenTreeStack& parents);
 #if defined(TARGET_ARM64)
-    void RewriteHWIntrinsicIndexOfWhereAllBitsSet(GenTree** use, Compiler::GenTreeStack& parents);
+    GenTree* ExpandExtractMostSignificantBitsArm64(GenTree* op1, var_types& simdBaseType, unsigned simdSize);
+    void     RewriteHWIntrinsicIndexOfWhereAllBitsSet(GenTree** use, Compiler::GenTreeStack& parents);
+    void     RewriteHWIntrinsicIndexOfWhereAllBitsSetGeneric(GenTree** use, Compiler::GenTreeStack& parents);
 #endif // TARGET_ARM64
 #endif // FEATURE_HW_INTRINSICS
 

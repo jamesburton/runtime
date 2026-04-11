@@ -46,6 +46,39 @@ public static class IndexOfWhereAllBitsSet
         Assert.Equal(0, GenericInt(Vector128.Create(-1, -1, -1, -1)));
     }
 
+    // Vectors with partial bits set (not 0, not AllBitsSet) — must not false-match
+    [Fact]
+    public static void IndexOf_Byte_PartialBits_Generic()
+    {
+        // 0x10 is non-zero but not 0xFF — should not match
+        var v = Vector128.Create((byte)0x10, 0x80, 0x7F, 0xFE, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        Assert.Equal(4, GenericByte(v));
+    }
+
+    [Fact]
+    public static void IndexOf_Short_PartialBits_Generic()
+    {
+        // 0x00FF and 0xFF00 are non-zero but not 0xFFFF — should not match
+        var v = Vector128.Create((short)0x00FF, unchecked((short)0xFF00), 0x7FFF, -1, 0, 0, 0, 0);
+        Assert.Equal(3, GenericShort(v));
+    }
+
+    [Fact]
+    public static void IndexOf_Int_PartialBits_Generic()
+    {
+        // 0x80000000 and 0x7FFFFFFF are non-zero but not -1
+        var v = Vector128.Create(int.MinValue, int.MaxValue, -1, 0);
+        Assert.Equal(2, GenericInt(v));
+    }
+
+    [Fact]
+    public static void IndexOf_NoAllBitsSet_Generic()
+    {
+        // No element is AllBitsSet, all have partial bits
+        var v = Vector128.Create(1, 2, 3, 4);
+        Assert.Equal(-1, GenericInt(v));
+    }
+
     // ===================== IndexOfWhereAllBitsSet: optimized path =====================
 
     [Fact]
@@ -127,6 +160,9 @@ public static class IndexOfWhereAllBitsSet
 
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     static int GenericInt(Vector128<int> v) => Vector128.IndexOfWhereAllBitsSet(v);
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    static int GenericShort(Vector128<short> v) => Vector128.IndexOfWhereAllBitsSet(v);
 
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     static int GenericLastInt(Vector128<int> v) => Vector128.LastIndexOfWhereAllBitsSet(v);
