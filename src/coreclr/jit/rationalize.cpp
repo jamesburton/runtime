@@ -609,7 +609,11 @@ void Rationalizer::RewriteHWIntrinsic(GenTree** use, Compiler::GenTreeStack& par
         case NI_Vector128_IndexOfWhereAllBitsSet:
         case NI_Vector128_LastIndexOfWhereAllBitsSet:
         {
-            if (node->gtFlags & GTF_HW_INPUT_ZERO_OR_ALLBITS)
+            // The SHRN trick only works for byte/short element types.
+            // For int/long, the wider-element SHRN conflates adjacent elements.
+            var_types baseType = node->AsHWIntrinsic()->GetSimdBaseType();
+            if ((node->gtFlags & GTF_HW_INPUT_ZERO_OR_ALLBITS) &&
+                (varTypeIsByte(baseType) || varTypeIsShort(baseType)))
             {
                 RewriteHWIntrinsicIndexOfWhereAllBitsSet(use, parents);
             }
@@ -1735,58 +1739,25 @@ void Rationalizer::RewriteHWIntrinsicIndexOfWhereAllBitsSet(GenTree** use, Compi
             shiftAmount    = 4;
             ctzDivisorLog2 = 3; // / 8
             break;
-        case TYP_INT:
-        case TYP_UINT:
-            shrnBaseType   = TYP_USHORT;
-            shiftAmount    = 8;
-            ctzDivisorLog2 = 4; // / 16
-            break;
-        case TYP_LONG:
-        case TYP_ULONG:
-            shrnBaseType   = TYP_UINT;
-            shiftAmount    = 16;
-            ctzDivisorLog2 = 5; // / 32
-            break;
         default:
             unreached();
     }
 
-    // For short/ushort: narrow from 8 ushort elements to 8 byte elements via SHRN(ushort→byte, #4).
-    // All-bits-set ushort (0xFFFF) >> 4 = 0x0FFF, narrowed to 0xFF; zero stays 0x00.
-    // Result: 8 bytes in Vector64, each 0x00 or 0xFF, extracted as uint64.
-    if (varTypeIsShort(simdBaseType))
-    {
-        GenTree* shiftIcon1 = m_compiler->gtNewIconNode(4);
-        BlockRange().InsertAfter(op1, shiftIcon1);
+    // SHRN: narrow from Vector128 to Vector64 by shifting right.
+    // For byte: treats 16 bytes as 8 x ushort, SHRN(ushort->byte, #4).
+    // For short: same treatment, producing 8 bytes (one per short element).
+    GenTree* shiftIcon = m_compiler->gtNewIconNode(shiftAmount);
+    BlockRange().InsertAfter(op1, shiftIcon);
 
-        op1 = m_compiler->gtNewSimdHWIntrinsicNode(TYP_SIMD8, op1, shiftIcon1,
-                                                   NI_AdvSimd_ShiftRightLogicalNarrowingLower, TYP_UBYTE, 8);
-        BlockRange().InsertAfter(shiftIcon1, op1);
+    GenTree* shrn = m_compiler->gtNewSimdHWIntrinsicNode(TYP_SIMD8, op1, shiftIcon,
+                                                         NI_AdvSimd_ShiftRightLogicalNarrowingLower, shrnBaseType, 8);
+    BlockRange().InsertAfter(shiftIcon, shrn);
 
-        // 8 bytes in Vector64, extract as u64 directly
-        node->gtType = TYP_LONG;
-        node->ChangeHWIntrinsicId(NI_Vector64_ToScalar);
-        node->SetSimdSize(8);
-        node->SetSimdBaseType(TYP_ULONG);
-        node->Op(1) = op1;
-    }
-    else
-    {
-        // Single SHRN for byte/int/long
-        GenTree* shiftIcon = m_compiler->gtNewIconNode(shiftAmount);
-        BlockRange().InsertAfter(op1, shiftIcon);
-
-        GenTree* shrn =
-            m_compiler->gtNewSimdHWIntrinsicNode(TYP_SIMD8, op1, shiftIcon, NI_AdvSimd_ShiftRightLogicalNarrowingLower,
-                                                 shrnBaseType, 8);
-        BlockRange().InsertAfter(shiftIcon, shrn);
-
-        node->gtType = TYP_LONG;
-        node->ChangeHWIntrinsicId(NI_Vector64_ToScalar);
-        node->SetSimdSize(8);
-        node->SetSimdBaseType(TYP_ULONG);
-        node->Op(1) = shrn;
-    }
+    node->gtType = TYP_LONG;
+    node->ChangeHWIntrinsicId(NI_Vector64_ToScalar);
+    node->SetSimdSize(8);
+    node->SetSimdBaseType(TYP_ULONG);
+    node->Op(1) = shrn;
 
     // Store mask in temp (needed for both bit-scan and SELECT condition)
     LIR::Use maskUse;
