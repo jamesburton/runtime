@@ -1596,9 +1596,11 @@ void Rationalizer::RewriteHWIntrinsicIndexOfWhereAllBitsSetGeneric(GenTree** use
 {
     GenTreeHWIntrinsic* node = (*use)->AsHWIntrinsic();
 
-    var_types simdBaseType = node->GetSimdBaseType();
-    unsigned  simdSize     = node->GetSimdSize();
-    var_types simdType     = Compiler::getSIMDTypeForSize(simdSize);
+    NamedIntrinsic intrinsicId  = node->GetHWIntrinsicId();
+    var_types      simdBaseType = node->GetSimdBaseType();
+    unsigned       simdSize     = node->GetSimdSize();
+    var_types      simdType     = Compiler::getSIMDTypeForSize(simdSize);
+    bool           isLastIndex  = (intrinsicId == NI_Vector128_LastIndexOfWhereAllBitsSet);
 
     GenTree* op1 = node->Op(1);
 
@@ -1637,21 +1639,39 @@ void Rationalizer::RewriteHWIntrinsicIndexOfWhereAllBitsSetGeneric(GenTree** use
     emsbUse.ReplaceWithLclVar(m_compiler);
     GenTree* emsbLcl = emsbUse.Def();
 
-    // Step 4: CTZ = RBIT + CLZ (TrailingZeroCount)
-    GenTree* rbit = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, emsbLcl, NI_ArmBase_ReverseElementBits);
-    BlockRange().InsertAfter(emsbLcl, rbit);
+    // Step 4: bit-scan to find element index
+    GenTree* scanResult;
 
-    GenTree* clz = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, rbit, NI_ArmBase_LeadingZeroCount);
-    BlockRange().InsertAfter(rbit, clz);
+    if (isLastIndex)
+    {
+        // LastIndexOf: 31 - CLZ(emsb)
+        GenTree* clz = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, emsbLcl, NI_ArmBase_LeadingZeroCount);
+        BlockRange().InsertAfter(emsbLcl, clz);
 
-    // Step 5: GT_SELECT(emsbResult, ctzResult, -1)
+        GenTree* icon31 = m_compiler->gtNewIconNode(31);
+        BlockRange().InsertAfter(clz, icon31);
+
+        scanResult = m_compiler->gtNewOperNode(GT_SUB, TYP_INT, icon31, clz);
+        BlockRange().InsertAfter(icon31, scanResult);
+    }
+    else
+    {
+        // IndexOf: CTZ = RBIT + CLZ (TrailingZeroCount)
+        GenTree* rbit = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, emsbLcl, NI_ArmBase_ReverseElementBits);
+        BlockRange().InsertAfter(emsbLcl, rbit);
+
+        scanResult = m_compiler->gtNewScalarHWIntrinsicNode(TYP_INT, rbit, NI_ArmBase_LeadingZeroCount);
+        BlockRange().InsertAfter(rbit, scanResult);
+    }
+
+    // Step 5: GT_SELECT(emsbResult, scanResult, -1)
     GenTree* emsbCond = m_compiler->gtClone(emsbLcl);
-    BlockRange().InsertAfter(clz, emsbCond);
+    BlockRange().InsertAfter(scanResult, emsbCond);
 
     GenTree* minus1 = m_compiler->gtNewIconNode(-1, TYP_INT);
     BlockRange().InsertAfter(emsbCond, minus1);
 
-    GenTreeConditional* select = m_compiler->gtNewConditionalNode(GT_SELECT, emsbCond, clz, minus1, TYP_INT);
+    GenTreeConditional* select = m_compiler->gtNewConditionalNode(GT_SELECT, emsbCond, scanResult, minus1, TYP_INT);
     BlockRange().InsertAfter(minus1, select);
 
     if (parents.Height() > 1)
