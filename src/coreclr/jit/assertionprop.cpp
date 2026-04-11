@@ -2599,6 +2599,25 @@ static bool AllComponentsEitherZeroOrAllBitsSet(Compiler* comp, ValueNum vn, var
         return false;
     }
 
+    // Check for SIMD constant vectors (all-zero or all-bits-set)
+    // TODO: we can be less conservative and allow components to be
+    // either all-zero or all-bits-set, but not necessarily the same across the entire vector.
+    if (comp->vnStore->IsVNConstant(vn))
+    {
+        var_types cnsTyp = comp->vnStore->TypeOfVN(vn);
+        if (cnsTyp == TYP_SIMD16)
+        {
+            simd16_t val = comp->vnStore->GetConstantSimd16(vn);
+            return val.IsAllBitsSet() || val.IsZero();
+        }
+        if (cnsTyp == TYP_SIMD8)
+        {
+            simd8_t val = comp->vnStore->GetConstantSimd8(vn);
+            return val.IsAllBitsSet() || val.IsZero();
+        }
+        return false;
+    }
+
     VNFuncApp funcApp;
     if (!comp->vnStore->GetVNFunc(vn, &funcApp))
     {
@@ -2649,9 +2668,14 @@ static bool AllComponentsEitherZeroOrAllBitsSet(Compiler* comp, ValueNum vn, var
         case GT_LT:
             return true;
 
+        case GT_NOT:
+            // ~0 = AllBitsSet, ~AllBitsSet = 0
+            return AllComponentsEitherZeroOrAllBitsSet(comp, funcApp.m_args[0], baseType);
+
         case GT_OR:
         case GT_AND:
         case GT_XOR:
+        case GT_AND_NOT:
             return AllComponentsEitherZeroOrAllBitsSet(comp, funcApp.m_args[0], baseType) &&
                    AllComponentsEitherZeroOrAllBitsSet(comp, funcApp.m_args[1], baseType);
 
