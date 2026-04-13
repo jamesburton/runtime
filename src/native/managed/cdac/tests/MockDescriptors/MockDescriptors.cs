@@ -198,6 +198,8 @@ internal partial class MockDescriptors
             new(nameof(Data.ExceptionInfo.CSFEHClause), DataType.pointer),
             new(nameof(Data.ExceptionInfo.CSFEnclosingClause), DataType.pointer),
             new(nameof(Data.ExceptionInfo.CallerOfActualHandlerFrame), DataType.pointer),
+            new(nameof(Data.ExceptionInfo.ClauseForCatchHandlerStartPC), DataType.uint32),
+            new(nameof(Data.ExceptionInfo.ClauseForCatchHandlerEndPC), DataType.uint32),
         ]
     };
 

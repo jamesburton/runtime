@@ -33,6 +33,11 @@ internal sealed class ReadyToRunInfo : IData<ReadyToRunInfo>
         DebugInfoSection = target.ReadPointer(address + (ulong)type.Fields[nameof(DebugInfoSection)].Offset);
         ExceptionInfoSection = target.ReadPointer(address + (ulong)type.Fields[nameof(ExceptionInfoSection)].Offset);
 
+        NumImportSections = target.Read<uint>(address + (ulong)type.Fields[nameof(NumImportSections)].Offset);
+        ImportSections = NumImportSections > 0
+            ? target.ReadPointer(address + (ulong)type.Fields[nameof(ImportSections)].Offset)
+            : TargetPointer.Null;
+
         // Map is from the composite info pointer (set to itself for non-multi-assembly composite images)
         EntryPointToMethodDescMap = CompositeInfo + (ulong)type.Fields[nameof(EntryPointToMethodDescMap)].Offset;
         LoadedImageBase = target.ReadPointer(address + (ulong)type.Fields[nameof(LoadedImageBase)].Offset);
@@ -55,4 +60,6 @@ internal sealed class ReadyToRunInfo : IData<ReadyToRunInfo>
     public TargetPointer EntryPointToMethodDescMap { get; }
     public TargetPointer LoadedImageBase { get; }
     public TargetPointer Composite { get; }
+    public uint NumImportSections { get; }
+    public TargetPointer ImportSections { get; }
 }
