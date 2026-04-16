@@ -14,6 +14,7 @@ class Program
         BodyFoldingTest.Run();
         DiagnosticMethodInfoTests.Run();
         Test108688Regression.Run();
+        RvaAlignmentTests.Run();
 
         string stackTrace = Environment.StackTrace;
 
@@ -251,6 +252,84 @@ class Program
             public void InstanceMethod() { }
             public void InstanceGenericMethod<U>() { }
         }
+    }
+
+    /// <summary>
+    /// Validates that stack trace metadata RVA lookups work correctly on all platforms,
+    /// including ARM32 where the THUMB bit (bit 0) is present in method addresses.
+    /// Exercises BinarySearch with aligned RVAs, StackTraceHidden (bit 1 flag),
+    /// and multi-method resolution.
+    /// </summary>
+    class RvaAlignmentTests
+    {
+        public static void Run()
+        {
+#if !STRIPPED
+            TestNestedMethodResolution();
+            TestStackTraceHiddenFiltering();
+            TestExceptionStackTrace();
+#endif
+        }
+
+        static void TestNestedMethodResolution()
+        {
+            string trace = CaptureNestedTrace();
+            if (!trace.Contains(nameof(Depth1)))
+                throw new Exception($"{nameof(Depth1)} not found in nested trace");
+            if (!trace.Contains(nameof(Depth2)))
+                throw new Exception($"{nameof(Depth2)} not found in nested trace");
+            if (!trace.Contains(nameof(Depth3)))
+                throw new Exception($"{nameof(Depth3)} not found in nested trace");
+        }
+
+        static void TestStackTraceHiddenFiltering()
+        {
+            try { ThrowFromHidden(); }
+            catch (Exception ex)
+            {
+                if (ex.StackTrace!.Contains(nameof(HiddenMethod)))
+                    throw new Exception($"{nameof(HiddenMethod)} should be hidden but was visible");
+                if (!ex.StackTrace.Contains(nameof(ThrowFromHidden)))
+                    throw new Exception($"{nameof(ThrowFromHidden)} should be visible but was not");
+            }
+        }
+
+        static void TestExceptionStackTrace()
+        {
+            try { ThrowDepth1(); }
+            catch (Exception ex)
+            {
+                if (!ex.StackTrace!.Contains(nameof(ThrowDepth1)))
+                    throw new Exception($"{nameof(ThrowDepth1)} not found in exception trace");
+                if (!ex.StackTrace.Contains(nameof(ThrowDepth2)))
+                    throw new Exception($"{nameof(ThrowDepth2)} not found in exception trace");
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static string CaptureNestedTrace() => Depth1();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static string Depth1() => Depth2();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static string Depth2() => Depth3();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static string Depth3() => Environment.StackTrace;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ThrowFromHidden() => HiddenMethod();
+
+        [StackTraceHidden]
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void HiddenMethod() => throw new InvalidOperationException("hidden");
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ThrowDepth1() => ThrowDepth2();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ThrowDepth2() => throw new Exception("test");
     }
 
 }
