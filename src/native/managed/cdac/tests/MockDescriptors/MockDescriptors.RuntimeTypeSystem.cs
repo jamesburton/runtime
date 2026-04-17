@@ -284,6 +284,19 @@ internal sealed class MockTypeVarTypeDesc : MockTypeDesc
 
 internal partial class MockDescriptors
 {
+    public class TypeFields : RuntimeTypeSystem
+    {
+        public TypeFields(MockMemorySpace.Builder builder)
+            : base(builder)
+        {
+        }
+
+        public TypeFields(MockMemorySpace.Builder builder, (ulong Start, ulong End) allocationRange)
+            : base(builder, allocationRange)
+        {
+        }
+    }
+
     public class RuntimeTypeSystem
     {
         internal const ulong TestFreeObjectMethodTableGlobalAddress = 0x00000000_7a0000a0;
