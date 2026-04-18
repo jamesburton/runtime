@@ -3,6 +3,7 @@
 
 using System.Buffers;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.DotNet.RemoteExecutor;
 using Xunit.Sdk;
@@ -280,6 +281,71 @@ namespace System.IO.Compression
                     }
                 }
             }, testScenario.ToString()).Dispose();
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task ZstandardStream_Decompress_LargeData_WithDripStream(bool async)
+        {
+            // Use random (incompressible) data that produces a compressed stream larger than
+            // ZstandardStream's internal 64 KB ArrayBuffer, exercising the buffer management
+            // across multiple read iterations.
+            byte[] testData = new byte[500_000];
+            new Random(42).NextBytes(testData);
+
+            byte[] compressed;
+            using (MemoryStream ms = new())
+            {
+                using (ZstandardStream compressor = new(ms, CompressionLevel.Fastest, leaveOpen: true))
+                {
+                    compressor.Write(testData);
+                }
+
+                compressed = ms.ToArray();
+            }
+
+            Assert.True(compressed.Length > BufferSize, "Compressed data should be larger than the internal buffer size");
+
+            // Feed compressed data through a DripStream that limits each read to a small
+            // chunk. This exercises the read loop with many iterations and verifies that
+            // the buffer management correctly ensures available space before each read.
+            foreach (int dripSize in new[] { 997, 2000, BufferSize - 1, BufferSize, BufferSize + 1 })
+            {
+                using DripStream dripStream = new(compressed, dripSize);
+                using ZstandardStream decompressor = new(dripStream, CompressionMode.Decompress);
+                using MemoryStream output = new();
+
+                if (async)
+                {
+                    await decompressor.CopyToAsync(output);
+                }
+                else
+                {
+                    decompressor.CopyTo(output);
+                }
+
+                Assert.Equal(testData, output.ToArray());
+            }
+        }
+
+        private sealed class DripStream : MemoryStream
+        {
+            private readonly int _dripSize;
+
+            public DripStream(byte[] buffer, int dripSize) : base(buffer) => _dripSize = dripSize;
+
+            public override int Read(byte[] buffer, int offset, int count) =>
+                base.Read(buffer, offset, Math.Min(count, _dripSize));
+
+            public override int Read(Span<byte> buffer) =>
+                base.Read(buffer.Slice(0, Math.Min(buffer.Length, _dripSize)));
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                base.ReadAsync(buffer, offset, Math.Min(count, _dripSize), cancellationToken);
+
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                base.ReadAsync(buffer.Slice(0, Math.Min(buffer.Length, _dripSize)), cancellationToken);
         }
 
     }
