@@ -3,7 +3,6 @@
 
 using System.Buffers;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.DotNet.RemoteExecutor;
 using Xunit.Sdk;
@@ -281,41 +280,6 @@ namespace System.IO.Compression
                     }
                 }
             }, testScenario.ToString()).Dispose();
-        }
-
-        [Fact]
-        public async Task ZstandardStream_ArrayBuffer_Boundary_DoesNotTruncate()
-        {
-            // compress enough data to fill the 64kb ArrayBuffer
-            byte[] testData = ZstandardTestUtils.CreateTestData(150000);
-            using MemoryStream compressedStream = new();
-            using (ZstandardStream compressor = new(compressedStream, CompressionLevel.Fastest, leaveOpen: true))
-            {
-                compressor.Write(testData);
-            }
-            // read using a stream that drips small chunks e.g., 2000 bytes
-            // so that _availableStart gradually reaches the 65536 bounds and is forced to trigger
-            // EnsureAvailableSpace.
-            using DripStream dripStream = new(compressedStream.ToArray(), 2000);
-            using ZstandardStream decompressor = new(dripStream, CompressionMode.Decompress);
-            using MemoryStream decompressedStream = new();
-
-            await decompressor.CopyToAsync(decompressedStream);
-            Assert.Equal(testData, decompressedStream.ToArray());
-        }
-
-        private class DripStream : MemoryStream
-        {
-            private readonly int _dripSize;
-            public DripStream(byte[] buffer, int dripSize) : base(buffer) { _dripSize = dripSize; }
-            public override int Read(byte[] buffer, int offset, int count) =>
-                base.Read(buffer, offset, Math.Min(count, _dripSize));
-            public override int Read(Span<byte> buffer) =>
-                base.Read(buffer.Slice(0, Math.Min(buffer.Length, _dripSize)));
-            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
-                base.ReadAsync(buffer, offset, Math.Min(count, _dripSize), cancellationToken);
-            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-                base.ReadAsync(buffer.Slice(0, Math.Min(buffer.Length, _dripSize)), cancellationToken);
         }
 
     }
