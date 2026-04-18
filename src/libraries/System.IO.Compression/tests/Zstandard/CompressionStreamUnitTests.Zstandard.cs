@@ -286,7 +286,7 @@ namespace System.IO.Compression
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public async Task ZstandardStream_Decompress_LargeData_WithDripStream(bool async)
+        public async Task ZstandardStream_Decompress_LargeData_WithDripStream(bool useAsync)
         {
             // Use random (incompressible) data that produces a compressed stream larger than
             // ZstandardStream's internal 64 KB ArrayBuffer, exercising the buffer management
@@ -316,7 +316,7 @@ namespace System.IO.Compression
                 using ZstandardStream decompressor = new(dripStream, CompressionMode.Decompress);
                 using MemoryStream output = new();
 
-                if (async)
+                if (useAsync)
                 {
                     await decompressor.CopyToAsync(output);
                 }
