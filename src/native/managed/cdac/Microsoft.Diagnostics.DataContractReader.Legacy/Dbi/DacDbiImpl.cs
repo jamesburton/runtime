@@ -755,7 +755,7 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
         byte[] contextBytes = new byte[context.Size];
         if (!_target.TryGetThreadContext(threadData.OSId.Value, context.DefaultContextFlags, contextBytes))
         {
-            throw new InvalidOperationException($"GetThreadContext failed for thread {threadData.OSId.Value}");
+            throw new InvalidOperationException($"Failed to get thread context for OS thread ID {threadData.OSId.Value}. The thread may not be available in the target.");
         }
 
         return contextBytes;

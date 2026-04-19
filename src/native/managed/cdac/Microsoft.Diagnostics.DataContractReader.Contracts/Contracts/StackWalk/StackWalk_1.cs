@@ -781,7 +781,6 @@ internal partial class StackWalk_1 : IStackWalk
     private void FillContextFromThread(IPlatformAgnosticContext context, ThreadData threadData)
     {
         byte[] bytes = new byte[context.Size];
-        Span<byte> buffer = new Span<byte>(bytes);
 
         // Match the native DacStackReferenceWalker behavior: if the thread has a
         // FilterContext or ProfilerFilterContext set, use that instead of calling
@@ -795,8 +794,8 @@ internal partial class StackWalk_1 : IStackWalk
 
         if (filterContext != TargetPointer.Null)
         {
-            _target.ReadBuffer(filterContext.Value, buffer);
-            context.FillFromBuffer(buffer);
+            _target.ReadBuffer(filterContext.Value, bytes);
+            context.FillFromBuffer(bytes);
             return;
         }
 
@@ -806,19 +805,18 @@ internal partial class StackWalk_1 : IStackWalk
     private void FillContextFromTargetDelegate(IPlatformAgnosticContext context, ThreadData threadData)
     {
         byte[] bytes = new byte[context.Size];
-        Span<byte> buffer = new Span<byte>(bytes);
 
         // The underlying ICLRDataTarget.GetThreadContext has some variance depending on the host.
         // SOS's managed implementation sets the ContextFlags to platform specific values defined in ThreadService.cs (diagnostics repo)
         // SOS's native implementation keeps the ContextFlags passed into this function.
         // To match the DAC behavior, the DefaultContextFlags are what the DAC passes in in DacGetThreadContext.
         // In most implementations, this will be overridden by the host, but in some cases, it may not be.
-        if (!_target.TryGetThreadContext(threadData.OSId.Value, context.DefaultContextFlags, buffer))
+        if (!_target.TryGetThreadContext(threadData.OSId.Value, context.DefaultContextFlags, bytes))
         {
             throw new InvalidOperationException($"GetThreadContext failed for thread {threadData.OSId.Value}");
         }
 
-        context.FillFromBuffer(buffer);
+        context.FillFromBuffer(bytes);
     }
 
     private static StackDataFrameHandle AssertCorrectHandle(IStackDataFrameHandle stackDataFrameHandle)
