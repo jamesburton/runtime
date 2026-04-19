@@ -686,6 +686,19 @@ internal partial class StackWalk_1 : IStackWalk
         return handle.Context.InstructionPointer;
     }
 
+    bool IStackWalk.IsSameFrame(ThreadData threadData, ReadOnlySpan<byte> context)
+    {
+        IPlatformAgnosticContext inputContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
+        inputContext.FillFromBuffer(context);
+
+        IPlatformAgnosticContext leafContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
+        FillContextFromTargetDelegate(leafContext, threadData);
+
+        return inputContext.StackPointer == leafContext.StackPointer
+            && inputContext.FramePointer == leafContext.FramePointer
+            && inputContext.InstructionPointer == leafContext.InstructionPointer;
+    }
+
     string IStackWalk.GetFrameName(TargetPointer frameIdentifier)
         => FrameIterator.GetFrameName(_target, frameIdentifier);
 
@@ -779,6 +792,14 @@ internal partial class StackWalk_1 : IStackWalk
             context.FillFromBuffer(buffer);
             return;
         }
+
+        FillContextFromTargetDelegate(context, threadData);
+    }
+
+    private void FillContextFromTargetDelegate(IPlatformAgnosticContext context, ThreadData threadData)
+    {
+        byte[] bytes = new byte[context.Size];
+        Span<byte> buffer = new Span<byte>(bytes);
 
         // The underlying ICLRDataTarget.GetThreadContext has some variance depending on the host.
         // SOS's managed implementation sets the ContextFlags to platform specific values defined in ThreadService.cs (diagnostics repo)

@@ -742,9 +742,14 @@ HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::IsLeafFrame(VMPTR_Thread vmThread
     HRESULT hr = S_OK;
     EX_TRY
     {
-
+        Thread * pThread = vmThread.GetDacPtr();
         DT_CONTEXT ctxLeaf;
-        IfFailThrow(GetContext(vmThread, &ctxLeaf));
+        ctxLeaf.ContextFlags = DT_CONTEXT_ALL;
+        IfFailThrow(m_pTarget->GetThreadContext(
+            pThread->GetOSThreadId(),
+            ctxLeaf.ContextFlags,
+            sizeof(DT_CONTEXT),
+            reinterpret_cast<BYTE *>(&ctxLeaf)));
 
         // Call a platform-specific helper to compare the two contexts.
         *pResult = CompareControlRegisters(pContext, &ctxLeaf);

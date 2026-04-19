@@ -8,6 +8,8 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Microsoft.Diagnostics.DataContractReader.Contracts;
+using Microsoft.Diagnostics.DataContractReader.Contracts.StackWalkHelpers;
+using Microsoft.Diagnostics.DataContractReader.Data;
 
 namespace Microsoft.Diagnostics.DataContractReader.Legacy;
 
@@ -667,10 +669,77 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetFramePointer(pSFIHandle, pRetVal) : HResults.E_NOTIMPL;
 
     public int IsLeafFrame(ulong vmThread, nint pContext, Interop.BOOL* pResult)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.IsLeafFrame(vmThread, pContext, pResult) : HResults.E_NOTIMPL;
+    {
+        *pResult = Interop.BOOL.FALSE;
+        int hr = HResults.S_OK;
+        try
+        {
+            if (pContext == 0)
+                throw new ArgumentException();
+
+            Contracts.ThreadData threadData = _target.Contracts.Thread.GetThreadData(new TargetPointer(vmThread));
+            IPlatformAgnosticContext platformContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
+            ReadOnlySpan<byte> context = new((void*)pContext, checked((int)platformContext.Size));
+            *pResult = _target.Contracts.StackWalk.IsSameFrame(threadData, context) ? Interop.BOOL.TRUE : Interop.BOOL.FALSE;
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+#if DEBUG
+        if (_legacy is not null)
+        {
+            Interop.BOOL resultLocal;
+            int hrLocal = _legacy.IsLeafFrame(vmThread, pContext, &resultLocal);
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK)
+                Debug.Assert(*pResult == resultLocal, $"cDAC: {*pResult}, DAC: {resultLocal}");
+        }
+#endif
+        return hr;
+    }
 
     public int GetContext(ulong vmThread, nint pContextBuffer)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetContext(vmThread, pContextBuffer) : HResults.E_NOTIMPL;
+    {
+        int hr = HResults.S_OK;
+        try
+        {
+            if (pContextBuffer == 0)
+                throw new ArgumentException();
+
+            IPlatformAgnosticContext context = IPlatformAgnosticContext.GetContextForPlatform(_target);
+            Span<byte> contextBuffer = new((void*)pContextBuffer, checked((int)context.Size));
+            Contracts.ThreadData threadData = _target.Contracts.Thread.GetThreadData(new TargetPointer(vmThread));
+            Thread thread = _target.ProcessedData.GetOrAdd<Thread>(threadData.ThreadAddress);
+
+            TargetPointer filterContext = thread.DebuggerFilterContext;
+            if (filterContext == TargetPointer.Null)
+            {
+                filterContext = thread.ProfilerFilterContext;
+            }
+
+            if (filterContext != TargetPointer.Null)
+            {
+                _target.ReadBuffer(filterContext.Value, contextBuffer);
+            }
+            else if (!_target.TryGetThreadContext(threadData.OSId.Value, context.DefaultContextFlags, contextBuffer))
+            {
+                throw new InvalidOperationException($"GetThreadContext failed for thread {threadData.OSId.Value}");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+#if DEBUG
+        if (_legacy is not null)
+        {
+            int hrLocal = _legacy.GetContext(vmThread, pContextBuffer);
+            Debug.ValidateHResult(hr, hrLocal);
+        }
+#endif
+        return hr;
+    }
 
     public int ConvertContextToDebuggerRegDisplay(nint pInContext, nint pOutDRD, Interop.BOOL fActive)
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.ConvertContextToDebuggerRegDisplay(pInContext, pOutDRD, fActive) : HResults.E_NOTIMPL;
