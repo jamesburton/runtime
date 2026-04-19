@@ -667,7 +667,22 @@ internal partial class StackWalk_1 : IStackWalk
     byte[] IStackWalk.GetLeafContext(ThreadData threadData)
     {
         IPlatformAgnosticContext context = IPlatformAgnosticContext.GetContextForPlatform(_target);
-        FillContextFromThread(context, threadData);
+
+        // For DBI GetContext: use DebuggerFilterContext if set; otherwise use the target delegate.
+        // (ProfilerFilterContext is intentionally not consulted here.)
+        Data.Thread thread = _target.ProcessedData.GetOrAdd<Data.Thread>(threadData.ThreadAddress);
+        TargetPointer filterContext = thread.DebuggerFilterContext;
+        if (filterContext != TargetPointer.Null)
+        {
+            byte[] bytes = new byte[context.Size];
+            _target.ReadBuffer(filterContext.Value, bytes);
+            context.FillFromBuffer(bytes);
+        }
+        else
+        {
+            FillContextFromTargetDelegate(context, threadData);
+        }
+
         return context.GetBytes();
     }
 

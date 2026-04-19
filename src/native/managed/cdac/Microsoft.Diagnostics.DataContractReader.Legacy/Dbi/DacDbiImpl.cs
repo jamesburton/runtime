@@ -679,23 +679,7 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
             Contracts.ThreadData threadData = _target.Contracts.Thread.GetThreadData(new TargetPointer(vmThread));
             IPlatformAgnosticContext platformContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
             ReadOnlySpan<byte> context = new((void*)pContext, checked((int)platformContext.Size));
-
-            if (_target.Contracts.TryGetContract(out Contracts.IStackWalk stackWalk))
-            {
-                *pResult = stackWalk.IsSameFrame(threadData, context) ? Interop.BOOL.TRUE : Interop.BOOL.FALSE;
-            }
-            else
-            {
-                byte[] leafContext = GetLeafContextFromTargetDelegate(threadData, platformContext);
-                platformContext.FillFromBuffer(context);
-                IPlatformAgnosticContext leafPlatformContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
-                leafPlatformContext.FillFromBuffer(leafContext);
-                *pResult = platformContext.StackPointer == leafPlatformContext.StackPointer
-                    && platformContext.FramePointer == leafPlatformContext.FramePointer
-                    && platformContext.InstructionPointer == leafPlatformContext.InstructionPointer
-                    ? Interop.BOOL.TRUE
-                    : Interop.BOOL.FALSE;
-            }
+            *pResult = _target.Contracts.StackWalk.IsSameFrame(threadData, context) ? Interop.BOOL.TRUE : Interop.BOOL.FALSE;
         }
         catch (System.Exception ex)
         {
@@ -725,15 +709,7 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
             IPlatformAgnosticContext context = IPlatformAgnosticContext.GetContextForPlatform(_target);
             Span<byte> contextBuffer = new((void*)pContextBuffer, checked((int)context.Size));
             Contracts.ThreadData threadData = _target.Contracts.Thread.GetThreadData(new TargetPointer(vmThread));
-            byte[] leafContext;
-            if (_target.Contracts.TryGetContract(out Contracts.IStackWalk stackWalk))
-            {
-                leafContext = stackWalk.GetLeafContext(threadData);
-            }
-            else
-            {
-                leafContext = GetLeafContextFromTargetDelegate(threadData, context);
-            }
+            byte[] leafContext = _target.Contracts.StackWalk.GetLeafContext(threadData);
             leafContext.CopyTo(contextBuffer);
         }
         catch (System.Exception ex)
@@ -748,17 +724,6 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
         }
 #endif
         return hr;
-    }
-
-    private byte[] GetLeafContextFromTargetDelegate(Contracts.ThreadData threadData, IPlatformAgnosticContext context)
-    {
-        byte[] contextBytes = new byte[context.Size];
-        if (!_target.TryGetThreadContext(threadData.OSId.Value, context.DefaultContextFlags, contextBytes))
-        {
-            throw new InvalidOperationException($"Failed to get thread context for OS thread ID {threadData.OSId.Value}. The thread may not be available in the target.");
-        }
-
-        return contextBytes;
     }
 
     public int ConvertContextToDebuggerRegDisplay(nint pInContext, nint pOutDRD, Interop.BOOL fActive)
