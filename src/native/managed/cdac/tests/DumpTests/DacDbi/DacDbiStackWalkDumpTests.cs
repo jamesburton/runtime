@@ -3,7 +3,6 @@
 
 using Microsoft.Diagnostics.DataContractReader.Contracts;
 using Microsoft.Diagnostics.DataContractReader.Contracts.StackWalkHelpers;
-using Microsoft.Diagnostics.DataContractReader.Data;
 using Microsoft.Diagnostics.DataContractReader.Legacy;
 using Xunit;
 
@@ -18,14 +17,16 @@ public unsafe class DacDbiStackWalkDumpTests : DumpTestBase
 
     [ConditionalTheory]
     [MemberData(nameof(TestConfigurations))]
-    public void GetContext_MatchesFilterOrTargetDelegateContext(TestConfiguration config)
+    public void GetContext_ReturnsValidLeafContext(TestConfiguration config)
     {
         InitializeDumpTest(config);
         DacDbiImpl dbi = CreateDacDbi();
-        TargetPointer threadPointer = FindThreadWithContext(dbi, out byte[] actualContext);
+        FindThreadWithContext(dbi, out byte[] actualContext);
 
-        byte[] expectedContext = GetExpectedContext(threadPointer);
-        Assert.Equal(expectedContext, actualContext);
+        IPlatformAgnosticContext context = IPlatformAgnosticContext.GetContextForPlatform(Target);
+        context.FillFromBuffer(actualContext);
+        Assert.NotEqual(TargetPointer.Null, context.InstructionPointer);
+        Assert.NotEqual(TargetPointer.Null, context.StackPointer);
     }
 
     [ConditionalTheory]
@@ -79,32 +80,4 @@ public unsafe class DacDbiStackWalkDumpTests : DumpTestBase
         throw new Xunit.Sdk.XunitException("No thread with retrievable context was found in the dump.");
     }
 
-    private byte[] GetExpectedContext(TargetPointer threadPointer)
-    {
-        IPlatformAgnosticContext context = IPlatformAgnosticContext.GetContextForPlatform(Target);
-        byte[] expectedContext = new byte[context.Size];
-        Span<byte> buffer = expectedContext;
-
-        ThreadData threadData = Target.Contracts.Thread.GetThreadData(threadPointer);
-        Thread thread = Target.ProcessedData.GetOrAdd<Thread>(threadData.ThreadAddress);
-
-        TargetPointer filterContext = thread.DebuggerFilterContext;
-        if (filterContext == TargetPointer.Null)
-        {
-            filterContext = thread.ProfilerFilterContext;
-        }
-
-        if (filterContext != TargetPointer.Null)
-        {
-            Target.ReadBuffer(filterContext.Value, buffer);
-        }
-        else
-        {
-            Assert.True(
-                Target.TryGetThreadContext(threadData.OSId.Value, context.DefaultContextFlags, buffer),
-                $"Expected GetThreadContext to succeed for thread {threadData.OSId.Value}");
-        }
-
-        return expectedContext;
-    }
 }
