@@ -708,7 +708,7 @@ internal partial class StackWalk_1 : IStackWalk
         return handle.Context.InstructionPointer;
     }
 
-    bool IStackWalk.IsSameFrame(ThreadData threadData, ReadOnlySpan<byte> context)
+    bool IStackWalk.IsSameFrame(ThreadData threadData, Span<byte> context)
     {
         IPlatformAgnosticContext inputContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
         inputContext.FillFromBuffer(context);

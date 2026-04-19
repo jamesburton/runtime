@@ -26,7 +26,7 @@ public sealed class ContextHolder<T> : IPlatformAgnosticContext, IEquatable<Cont
         target.ReadBuffer(address, buffer);
         FillFromBuffer(buffer);
     }
-    public unsafe void FillFromBuffer(ReadOnlySpan<byte> buffer)
+    public unsafe void FillFromBuffer(Span<byte> buffer)
     {
         Span<T> structSpan = new(ref Context);
         Span<byte> byteSpan = MemoryMarshal.Cast<T, byte>(structSpan);

@@ -678,7 +678,7 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
 
             Contracts.ThreadData threadData = _target.Contracts.Thread.GetThreadData(new TargetPointer(vmThread));
             IPlatformAgnosticContext platformContext = IPlatformAgnosticContext.GetContextForPlatform(_target);
-            ReadOnlySpan<byte> context = new((void*)pContext, checked((int)platformContext.Size));
+            Span<byte> context = new((void*)pContext, checked((int)platformContext.Size));
             *pResult = _target.Contracts.StackWalk.IsSameFrame(threadData, context) ? Interop.BOOL.TRUE : Interop.BOOL.FALSE;
         }
         catch (System.Exception ex)

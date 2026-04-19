@@ -34,7 +34,7 @@ public interface IStackWalk : IContract
     TargetPointer GetMethodDescPtr(TargetPointer framePtr) => throw new NotImplementedException();
     TargetPointer GetMethodDescPtr(IStackDataFrameHandle stackDataFrameHandle) => throw new NotImplementedException();
     TargetPointer GetInstructionPointer(IStackDataFrameHandle stackDataFrameHandle) => throw new NotImplementedException();
-    bool IsSameFrame(ThreadData threadData, ReadOnlySpan<byte> context) => throw new NotImplementedException();
+    bool IsSameFrame(ThreadData threadData, Span<byte> context) => throw new NotImplementedException();
 }
 
 public struct StackWalk : IStackWalk
