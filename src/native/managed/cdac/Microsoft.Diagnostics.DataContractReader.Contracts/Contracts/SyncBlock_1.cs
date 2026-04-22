@@ -14,6 +14,7 @@ internal readonly struct SyncBlock_1 : ISyncBlock
     private const string ConditionWaitersHeadFieldName = "_waitersHead";
     private const string ConditionWaiterName = "Condition+Waiter";
     private const string ConditionWaiterNextFieldName = "next";
+    private const uint MaxAdditionalThreadCount = 1000;
     private const string LockStateName = "_state";
     private const string LockOwningThreadIdName = "_owningThreadId";
     private const string LockRecursionCountName = "_recursionCount";
@@ -124,7 +125,8 @@ internal readonly struct SyncBlock_1 : ISyncBlock
         Data.Object conditionObj = _target.ProcessedData.GetOrAdd<Data.Object>(condition);
         TargetPointer waiter = _target.ReadPointer(conditionObj.Data + waitersHeadOffset);
         uint additionalThreadCount = 0;
-        while (waiter != TargetPointer.Null && additionalThreadCount < 1000)
+        // The result is capped to guard against corrupted waiter lists.
+        while (waiter != TargetPointer.Null && additionalThreadCount < MaxAdditionalThreadCount)
         {
             additionalThreadCount++;
             Data.Object waiterObj = _target.ProcessedData.GetOrAdd<Data.Object>(waiter);
@@ -181,16 +183,9 @@ internal readonly struct SyncBlock_1 : ISyncBlock
 
     private TargetPointer GetSyncBlockAssociatedObject(TargetPointer syncBlock)
     {
-        uint syncBlockCount = GetSyncBlockCount();
-        for (uint index = 1; index <= syncBlockCount; index++)
-        {
-            if (IsSyncBlockFree(index))
-                continue;
-
-            if (GetSyncBlock(index) == syncBlock)
-                return GetSyncBlockObject(index);
-        }
-
+        Data.SyncBlockObjectMap map = _target.ProcessedData.GetOrAdd<Data.SyncBlockObjectMap>(_syncTableEntries);
+        if (map.TryGetObject(syncBlock, out TargetPointer obj))
+            return obj;
         return TargetPointer.Null;
     }
 }

@@ -51,6 +51,7 @@ Global variables used:
 | `ConditionWaitersHeadFieldName` | string | Field name in `System.Threading.Condition` storing the head of the waiter linked list. | `_waitersHead` |
 | `ConditionWaiterName` | string | Type name used to resolve the waiter node type under `System.Threading.Condition`. | `Condition+Waiter` |
 | `ConditionWaiterNextFieldName` | string | Field name in waiter nodes for the next waiter in the linked list. | `next` |
+| `MaxAdditionalThreadCount` | uint | Safety bound while traversing waiter nodes to avoid unbounded traversal on corrupted state; returned count is capped at this value. | `1000` |
 | `LockStateName` | string | Field name in `System.Threading.Lock` storing monitor-held state bits. | `_state` |
 | `LockOwningThreadIdName` | string | Field name in `System.Threading.Lock` storing owning thread id. | `_owningThreadId` |
 | `LockRecursionCountName` | string | Field name in `System.Threading.Lock` storing monitor recursion count. | `_recursionCount` |
@@ -145,7 +146,7 @@ private uint ReadUintField(TypeHandle enclosingType, string fieldName, IRuntimeT
 
 uint GetAdditionalThreadCount(TargetPointer syncBlock)
 {
-    // Find the object for this sync block by scanning active sync table entries.
+    // Find the object for this sync block using a cached map built from active sync table entries.
     TargetPointer obj = FindObjectForSyncBlock(syncBlock);
     if (obj == TargetPointer.Null)
         return 0;
@@ -165,7 +166,7 @@ uint GetAdditionalThreadCount(TargetPointer syncBlock)
     // Count waiter nodes in Condition._waitersHead linked list via Waiter.next.
     uint count = 0;
     TargetPointer waiter = ReadObjectField(condition, "System.Threading", "Condition", "_waitersHead");
-    while (waiter != TargetPointer.Null && count < 1000)
+    while (waiter != TargetPointer.Null && count < MaxAdditionalThreadCount)
     {
         count++;
         waiter = ReadObjectField(waiter, "System.Threading", "Condition+Waiter", "next");
