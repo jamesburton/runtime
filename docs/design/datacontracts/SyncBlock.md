@@ -45,6 +45,12 @@ Global variables used:
 ### Contract Constants:
 | Name | Type | Purpose | Value |
 | --- | --- | --- | --- |
+| `MonitorName` | string | Type name used to resolve `System.Threading.Monitor`. | `Monitor` |
+| `MonitorConditionTableFieldName` | string | Static field name in `System.Threading.Monitor` storing the object-to-condition mapping table. | `s_conditionTable` |
+| `ConditionName` | string | Type name used to resolve `System.Threading.Condition`. | `Condition` |
+| `ConditionWaitersHeadFieldName` | string | Field name in `System.Threading.Condition` storing the head of the waiter linked list. | `_waitersHead` |
+| `ConditionWaiterName` | string | Type name used to resolve the waiter node type under `System.Threading.Condition`. | `Condition+Waiter` |
+| `ConditionWaiterNextFieldName` | string | Field name in waiter nodes for the next waiter in the linked list. | `next` |
 | `LockStateName` | string | Field name in `System.Threading.Lock` storing monitor-held state bits. | `_state` |
 | `LockOwningThreadIdName` | string | Field name in `System.Threading.Lock` storing owning thread id. | `_owningThreadId` |
 | `LockRecursionCountName` | string | Field name in `System.Threading.Lock` storing monitor recursion count. | `_recursionCount` |
@@ -57,6 +63,7 @@ Contracts used:
 | `Loader` |
 | `RuntimeTypeSystem` |
 | `EcmaMetadata` |
+| `ConditionalWeakTable` |
 
 ``` csharp
 TargetPointer GetSyncBlock(uint index)
@@ -138,8 +145,33 @@ private uint ReadUintField(TypeHandle enclosingType, string fieldName, IRuntimeT
 
 uint GetAdditionalThreadCount(TargetPointer syncBlock)
 {
-    // TODO: read conditional weaktable
-    return 0;
+    // Find the object for this sync block by scanning active sync table entries.
+    TargetPointer obj = FindObjectForSyncBlock(syncBlock);
+    if (obj == TargetPointer.Null)
+        return 0;
+
+    // Read Monitor.s_conditionTable (ConditionalWeakTable<object, Condition>)
+    TargetPointer conditionTable = ReadStaticField(
+        "System.Threading",
+        "Monitor",
+        "s_conditionTable");
+    if (conditionTable == TargetPointer.Null)
+        return 0;
+
+    // Resolve object -> Condition via CWT.
+    if (!ConditionalWeakTable.TryGetValue(conditionTable, obj, out TargetPointer condition))
+        return 0;
+
+    // Count waiter nodes in Condition._waitersHead linked list via Waiter.next.
+    uint count = 0;
+    TargetPointer waiter = ReadObjectField(condition, "System.Threading", "Condition", "_waitersHead");
+    while (waiter != TargetPointer.Null && count < 1000)
+    {
+        count++;
+        waiter = ReadObjectField(waiter, "System.Threading", "Condition+Waiter", "next");
+    }
+
+    return count;
 }
 
 // Returns the first sync block in the cleanup list, or TargetPointer.Null if the list is empty.

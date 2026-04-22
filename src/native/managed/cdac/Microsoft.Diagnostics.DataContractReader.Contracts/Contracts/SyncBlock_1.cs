@@ -8,6 +8,12 @@ namespace Microsoft.Diagnostics.DataContractReader.Contracts;
 
 internal readonly struct SyncBlock_1 : ISyncBlock
 {
+    private const string MonitorName = "Monitor";
+    private const string MonitorConditionTableFieldName = "s_conditionTable";
+    private const string ConditionName = "Condition";
+    private const string ConditionWaitersHeadFieldName = "_waitersHead";
+    private const string ConditionWaiterName = "Condition+Waiter";
+    private const string ConditionWaiterNextFieldName = "next";
     private const string LockStateName = "_state";
     private const string LockOwningThreadIdName = "_owningThreadId";
     private const string LockRecursionCountName = "_recursionCount";
@@ -95,8 +101,37 @@ internal readonly struct SyncBlock_1 : ISyncBlock
 
     public uint GetAdditionalThreadCount(TargetPointer syncBlock)
     {
-        // TODO: read conditional weak table to get additional thread count
-        return 0;
+        TargetPointer obj = GetSyncBlockAssociatedObject(syncBlock);
+        if (obj == TargetPointer.Null)
+            return 0;
+
+        IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
+        rts.GetCoreLibFieldDescAndDef(LockNamespace, MonitorName, MonitorConditionTableFieldName, out TargetPointer conditionTableFieldDescAddr, out _);
+        TargetPointer conditionTable = _target.ReadPointer(rts.GetFieldDescStaticAddress(conditionTableFieldDescAddr));
+        if (conditionTable == TargetPointer.Null)
+            return 0;
+
+        IConditionalWeakTable cwt = _target.Contracts.ConditionalWeakTable;
+        if (!cwt.TryGetValue(conditionTable, obj, out TargetPointer condition))
+            return 0;
+
+        rts.GetCoreLibFieldDescAndDef(LockNamespace, ConditionName, ConditionWaitersHeadFieldName, out TargetPointer waitersHeadFieldDescAddr, out FieldDefinition waitersHeadFieldDef);
+        uint waitersHeadOffset = rts.GetFieldDescOffset(waitersHeadFieldDescAddr, waitersHeadFieldDef);
+
+        rts.GetCoreLibFieldDescAndDef(LockNamespace, ConditionWaiterName, ConditionWaiterNextFieldName, out TargetPointer waiterNextFieldDescAddr, out FieldDefinition waiterNextFieldDef);
+        uint waiterNextOffset = rts.GetFieldDescOffset(waiterNextFieldDescAddr, waiterNextFieldDef);
+
+        Data.Object conditionObj = _target.ProcessedData.GetOrAdd<Data.Object>(condition);
+        TargetPointer waiter = _target.ReadPointer(conditionObj.Data + waitersHeadOffset);
+        uint additionalThreadCount = 0;
+        while (waiter != TargetPointer.Null && additionalThreadCount < 1000)
+        {
+            additionalThreadCount++;
+            Data.Object waiterObj = _target.ProcessedData.GetOrAdd<Data.Object>(waiter);
+            waiter = _target.ReadPointer(waiterObj.Data + waiterNextOffset);
+        }
+
+        return additionalThreadCount;
     }
 
     public TargetPointer GetSyncBlockFromCleanupList()
@@ -142,5 +177,20 @@ internal readonly struct SyncBlock_1 : ISyncBlock
         FieldDefinition fieldDef = mdReader.GetFieldDefinition(fieldHandle);
         uint offset = rts.GetFieldDescOffset(field, fieldDef);
         return _target.Read<uint>(dataAddr + offset);
+    }
+
+    private TargetPointer GetSyncBlockAssociatedObject(TargetPointer syncBlock)
+    {
+        uint syncBlockCount = GetSyncBlockCount();
+        for (uint index = 1; index <= syncBlockCount; index++)
+        {
+            if (IsSyncBlockFree(index))
+                continue;
+
+            if (GetSyncBlock(index) == syncBlock)
+                return GetSyncBlockObject(index);
+        }
+
+        return TargetPointer.Null;
     }
 }
