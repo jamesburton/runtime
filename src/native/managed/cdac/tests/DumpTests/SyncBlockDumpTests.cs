@@ -25,6 +25,7 @@ public class SyncBlockDumpTests : DumpTestBase
         TargetPointer syncBlock = TargetPointer.Null;
         uint ownerThreadId = 0;
         uint recursion = 0;
+        uint additionalThreadCount = 0;
         bool found = false;
 
         ISyncBlock syncBlockContract = Target.Contracts.SyncBlock;
@@ -43,6 +44,7 @@ public class SyncBlockDumpTests : DumpTestBase
                 continue;
 
             syncBlock = candidate;
+            additionalThreadCount = syncBlockContract.GetAdditionalThreadCount(candidate);
             found = true;
             break;
         }
@@ -50,6 +52,7 @@ public class SyncBlockDumpTests : DumpTestBase
         Assert.True(found, "Expected to find a sync block with a held monitor.");
         Assert.True(ownerThreadId != 0, "Expected non-zero lock owner thread id.");
         Assert.True(recursion >= 1, "Expected recursion count >= 1.");
+        Assert.True(additionalThreadCount >= 1, "Expected at least one additional waiting thread.");
         Assert.True(syncBlock != TargetPointer.Null, "Expected non-null sync block");
     }
 }
