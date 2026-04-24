@@ -280,12 +280,27 @@ namespace ILAssembler
                 }
                 : null;
 
+            // Build native resource section from .obj file if specified
+            ResourceSectionBuilder? nativeResources = null;
+            if (_options.ResourceFile is not null)
+            {
+                try
+                {
+                    nativeResources = CoffResourceSectionBuilder.FromObjectFile(_options.ResourceFile);
+                }
+                catch (Exception ex) when (ex is BadImageFormatException or FileNotFoundException or IOException)
+                {
+                    _diagnostics.Add(new Diagnostic("ResourceFile", DiagnosticSeverity.Error, ex.Message, new Location(new SourceSpan(0, 0), new SourceText("", ""))));
+                }
+            }
+
             ManagedPEBuilder standardBuilder = new(
                 header,
                 rootBuilder,
                 ilStream,
                 _mappedFieldData,
                 _manifestResources,
+                nativeResources,
                 flags: standardCorFlags,
                 entryPoint: entryPoint,
                 debugDirectoryBuilder: debugDirectoryBuilder,

@@ -66,6 +66,9 @@ internal sealed class IlasmRootCommand : RootCommand
     public Option<string> IncludePath { get; } =
         new("--include", "-I", "-INC") { Description = "Set path to search for #include'd files" };
 
+    public Option<string> ResourceFile { get; } =
+        new("--resources", "-RESOURCES") { Description = "Link Win32 resource file (.obj format from CvtRes.exe)" };
+
     public Option<int> Subsystem { get; } =
         new("--subsystem", "-SUBSYSTEM") { Description = "Set Subsystem value in the NT Optional header" };
 
@@ -140,6 +143,7 @@ internal sealed class IlasmRootCommand : RootCommand
         Options.Add(KeyFile);
         Options.Add(AssemblyName);
         Options.Add(IncludePath);
+        Options.Add(ResourceFile);
         Options.Add(Subsystem);
         Options.Add(SubsystemVersion);
         Options.Add(Flags);

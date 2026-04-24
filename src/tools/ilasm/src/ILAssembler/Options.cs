@@ -139,6 +139,11 @@ namespace ILAssembler
         public string? OutputFileName { get; set; }
 
         /// <summary>
+        /// Path to a COFF .obj file containing Win32 resources (.rsrc$01 and .rsrc$02 sections).
+        /// </summary>
+        public string? ResourceFile { get; set; }
+
+        /// <summary>
         /// Try to create output file despite errors (results may be invalid).
         /// </summary>
         public bool ErrorTolerant { get; set; }

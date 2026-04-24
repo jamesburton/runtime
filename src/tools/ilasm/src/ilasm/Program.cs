@@ -163,6 +163,7 @@ internal sealed class Program
             options.Optimize = Get(_command.Optimize);
             options.Fold = Get(_command.Fold);
             options.OutputFileName = Path.GetFileName(outputPath);
+            options.ResourceFile = Get(_command.ResourceFile);
 
             // Set up include path for #include directive resolution
             string? includePath = Get(_command.IncludePath);
@@ -318,7 +319,9 @@ internal sealed class Program
 
             if (arg.StartsWith("-RESOURCES=", StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"Unsupported native option '{arg}'. The managed ilasm implementation does not support -RESOURCES.");
+                result.Add("--resources");
+                result.Add(arg.Substring("-RESOURCES=".Length));
+                continue;
             }
 
             if (arg.StartsWith('-') && !arg.StartsWith("--"))
