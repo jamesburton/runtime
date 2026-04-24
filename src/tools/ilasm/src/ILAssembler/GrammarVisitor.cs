@@ -280,13 +280,13 @@ namespace ILAssembler
                 }
                 : null;
 
-            // Build native resource section from .obj file if specified
+            // Build native resource section from .obj or .res file if specified
             ResourceSectionBuilder? nativeResources = null;
             if (_options.ResourceFile is not null)
             {
                 try
                 {
-                    nativeResources = CoffResourceSectionBuilder.FromObjectFile(_options.ResourceFile);
+                    nativeResources = LoadNativeResources(_options.ResourceFile);
                 }
                 catch (Exception ex) when (ex is BadImageFormatException or FileNotFoundException or IOException)
                 {
@@ -307,6 +307,34 @@ namespace ILAssembler
                 deterministicIdProvider: deterministicIdProvider);
 
             return (_diagnostics.ToImmutable(), standardBuilder);
+        }
+
+        /// <summary>
+        /// Detects the resource file format (.res or .obj) and loads the appropriate builder.
+        /// </summary>
+        private static ResourceSectionBuilder LoadNativeResources(string resourceFilePath)
+        {
+            // Detect format by reading the first bytes.
+            // .res files start with a null resource: DataSize=0 (4 bytes of zero).
+            // COFF .obj files start with an IMAGE_FILE_HEADER where the first 2 bytes are the Machine field.
+            byte[] header = new byte[4];
+            using (var fs = File.OpenRead(resourceFilePath))
+            {
+                if (fs.Read(header, 0, 4) < 4)
+                {
+                    throw new BadImageFormatException("Resource file is too small to be a valid .res or .obj file.");
+                }
+            }
+
+            uint firstDword = BitConverter.ToUInt32(header, 0);
+            if (firstDword == 0)
+            {
+                // .res format starts with DataSize=0 (null resource)
+                return ResResourceSectionBuilder.FromResFile(resourceFilePath);
+            }
+
+            // Otherwise assume COFF .obj format
+            return CoffResourceSectionBuilder.FromObjectFile(resourceFilePath);
         }
 
         private ImmutableArray<VTableExportPEBuilder.VTableFixupInfo> BuildVTableFixupInfos()
