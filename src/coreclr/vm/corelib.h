@@ -740,6 +740,13 @@ DEFINE_METHOD(RUNTIME_ASYNC_AWAIT_STATE, POP,                 Pop,  NoSig)
 
 DEFINE_CLASS(RUNTIME_ASYNC_STACK_STATE,  CompilerServices,    AsyncHelpers+RuntimeAsyncStackState)
 
+// AsyncDispatcherInfo is a ref struct used to track the current async dispatcher state per thread.
+// Debuggers and tools like cDAC depend on this type being findable in TypeDefToMethodTable
+// (the type comment says "Debugger depends on the exact name of this field" for t_current).
+// It must be loaded eagerly during async thunk generation so it appears in every process
+// that runs async code, not just in the crossgen process.
+DEFINE_CLASS(ASYNC_DISPATCHER_INFO,      CompilerServices,    AsyncDispatcherInfo)
+
 DEFINE_CLASS_U(CompilerServices, Continuation,          ContinuationObject)
 DEFINE_FIELD_U(Next,             ContinuationObject,    Next)
 DEFINE_FIELD_U(ResumeInfo,       ContinuationObject,    ResumeInfo)

@@ -138,6 +138,13 @@ void MethodDesc::EmitTaskReturningThunk(MethodDesc* pAsyncCallVariant, MetaSig& 
     LocalDesc stackStateLocalDesc(TypeHandle(CoreLibBinder::GetClass(CLASS__RUNTIME_ASYNC_STACK_STATE)));
     DWORD stackStateLocal = pCode->NewLocal(stackStateLocalDesc);
 
+    // Eagerly load AsyncDispatcherInfo so it is always present in TypeDefToMethodTable.
+    // DispatchContinuations (which sets AsyncDispatcherInfo::t_current) is compiled by
+    // crossgen/R2R, so in R2R mode it never triggers ClassLoader in the running process.
+    // Thunk generation always runs at JIT time, making this the right place to ensure
+    // the type is findable by debuggers and tools like cDAC.
+    CoreLibBinder::GetClass(CLASS__ASYNC_DISPATCHER_INFO);
+
     LocalDesc refAwaitStateLocalDesc(TypeHandle(CoreLibBinder::GetClass(CLASS__RUNTIME_ASYNC_AWAIT_STATE)));
     refAwaitStateLocalDesc.MakeByRef();
     DWORD refAwaitStateLocal = pCode->NewLocal(refAwaitStateLocalDesc);
