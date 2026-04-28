@@ -75,7 +75,6 @@ namespace System.Runtime.CompilerServices
 
         // See note in ContinuationFlags above for the computation of these offsets.
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe object GetContinuationContext()
         {
             const uint mask = (1u << (int)ContinuationFlags.ContinuationContextIndexNumBits) - 1;
@@ -85,14 +84,12 @@ namespace System.Runtime.CompilerServices
             return Unsafe.As<byte, object>(ref Unsafe.Add(ref data, (DataOffset - PointerSize) + index * PointerSize));
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool HasException()
         {
             const uint mask = (1u << (int)ContinuationFlags.ExceptionIndexNumBits) - 1;
             return ((uint)Flags & (mask << (int)ContinuationFlags.ExceptionIndexFirstBit)) != 0;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetException(Exception ex)
         {
             const uint mask = (1u << (int)ContinuationFlags.ExceptionIndexNumBits) - 1;
@@ -102,7 +99,6 @@ namespace System.Runtime.CompilerServices
             Unsafe.As<byte, Exception>(ref Unsafe.Add(ref data, (DataOffset - PointerSize) + index * PointerSize)) = ex;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref byte GetResultStorageOrNull()
         {
             const uint mask = (1u << (int)ContinuationFlags.ResultIndexNumBits) - 1;
