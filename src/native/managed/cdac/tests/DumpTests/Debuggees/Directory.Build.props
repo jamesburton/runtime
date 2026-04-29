@@ -17,9 +17,13 @@
          Supported values: "R2R", "Jit", or "R2R;Jit" for both.
          R2R runs the debuggee normally (with ReadyToRun precompiled code).
          Jit runs with DOTNET_ReadyToRun=0 to force JIT compilation.
-         Binaries are always compiled with R2R; this controls runtime behavior only. -->
+         By default binaries are compiled with R2R (PublishReadyToRun=true); this
+         controls runtime behavior only. -->
     <R2RModes Condition="'$(R2RModes)' == ''">R2R</R2RModes>
     <!-- Set to true in a debuggee csproj to exclude it from non-Windows platforms. -->
     <WindowsOnly Condition="'$(WindowsOnly)' == ''">false</WindowsOnly>
+    <!-- Set to false in a debuggee csproj to skip ReadyToRun compilation (e.g. when the
+         debuggee uses features that crossgen2 does not yet support). -->
+    <PublishReadyToRun Condition="'$(PublishReadyToRun)' == ''">true</PublishReadyToRun>
   </PropertyGroup>
 </Project>

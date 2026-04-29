@@ -5,5 +5,8 @@
     <EnablePreviewFeatures>true</EnablePreviewFeatures>
     <NoWarn>$(NoWarn);CA2007;CA2252</NoWarn>
     <DumpTypes>Heap</DumpTypes>
+    <!-- crossgen2 crashes on async thunks for runtime-async=on code (it cannot find
+         RuntimeAsyncStackState nested in AsyncHelpers), so skip R2R compilation. -->
+    <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
 </Project>

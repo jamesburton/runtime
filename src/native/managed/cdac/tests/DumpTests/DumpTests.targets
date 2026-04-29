@@ -18,7 +18,8 @@
       "R2R"        — run with ReadyToRun enabled (default)
       "Jit"        — run with DOTNET_ReadyToRun=0 (force JIT compilation)
       "R2R;Jit"    — both modes
-    Binaries are always compiled with R2R; this property controls runtime behavior only.
+    By default binaries are compiled with R2R; set PublishReadyToRun=false in a debuggee
+    csproj to opt out (e.g. when the debuggee uses features crossgen2 does not yet support).
 
     Properties:
       DumpOutputDir          — Where dumps are written (default: artifacts/dumps/cdac/)
@@ -154,9 +155,10 @@
              Importance="high" />
   </Target>
 
-  <!-- Build all debuggees with R2R without running them (for Helix payload preparation).
-       Uses dotnet publish (via Exec) with ReadyToRun enabled to produce R2R-compiled
-       framework-dependent binaries. Invoke explicitly: dotnet msbuild /t:BuildDebuggeesOnly -->
+  <!-- Build all debuggees without running them (for Helix payload preparation).
+       Uses dotnet publish (via Exec) to produce framework-dependent binaries.
+       PublishReadyToRun is controlled per-debuggee via Directory.Build.props (default: true).
+       Invoke explicitly: dotnet msbuild /t:BuildDebuggeesOnly -->
   <Target Name="BuildDebuggeesOnly">
     <MSBuild Projects="$(MSBuildProjectFile)"
              Targets="_PublishSingleDebuggee"
@@ -167,7 +169,7 @@
     <PropertyGroup>
       <_PublishOutDir>$([MSBuild]::NormalizeDirectory('$(RepoRoot)', 'artifacts', 'bin', 'DumpTests', '$(DebuggeeName)', '$(DebuggeeConfiguration)', '$(NetCoreAppCurrent)'))</_PublishOutDir>
     </PropertyGroup>
-    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:PublishReadyToRun=true /p:RuntimeConfiguration=$(RuntimeConfiguration) --nologo -o &quot;$(_PublishOutDir)&quot;" />
+    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:RuntimeConfiguration=$(RuntimeConfiguration) --nologo -o &quot;$(_PublishOutDir)&quot;" />
   </Target>
 
   <Target Name="_GenerateDumpsForDebuggee">
@@ -254,7 +256,7 @@
       <_DebuggeeCsproj>$([MSBuild]::NormalizePath('$(_DebuggeeDir)', '$(DebuggeeName).csproj'))</_DebuggeeCsproj>
     </PropertyGroup>
 
-    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:PublishReadyToRun=true /p:RuntimeConfiguration=$(RuntimeConfiguration) --nologo -o &quot;$(_DebuggeeBinDir)&quot;"
+    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(NetCoreAppCurrent) -r $(PortableTargetRid) --no-self-contained /p:RuntimeConfiguration=$(RuntimeConfiguration) --nologo -o &quot;$(_DebuggeeBinDir)&quot;"
           WorkingDirectory="$(_DebuggeeDir)" />
 
     <MakeDir Directories="$(_DumpDir)" />
@@ -267,7 +269,7 @@
     <Error Text="Dump file could not be created: $(_DumpFile)" Condition="!Exists('$(_DumpFile)')" />
   </Target>
 
-  <!-- Released runtime: self-contained publish with R2R, run the exe directly -->
+  <!-- Released runtime: self-contained publish, run the exe directly -->
   <Target Name="_GeneratePublishedDump">
     <PropertyGroup>
       <_PublishDir>$([MSBuild]::NormalizeDirectory('$(RepoRoot)', 'artifacts', 'bin', 'DumpTests', '$(DebuggeeName)', '$(DebuggeeConfiguration)', '$(DumpRuntimeVersion)-publish'))</_PublishDir>
@@ -275,7 +277,7 @@
       <_PublishedExe>$([MSBuild]::NormalizePath('$(_PublishDir)', '$(DebuggeeName)$(ExeSuffix)'))</_PublishedExe>
     </PropertyGroup>
 
-    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(DumpRuntimeVersion) -r $(PortableTargetRid) --self-contained /p:PublishReadyToRun=true --nologo -o &quot;$(_PublishDir)&quot;"
+    <Exec Command="&quot;$(_DotNetExe)&quot; publish &quot;$(_DebuggeeCsproj)&quot; -c $(DebuggeeConfiguration) -f $(DumpRuntimeVersion) -r $(PortableTargetRid) --self-contained --nologo -o &quot;$(_PublishDir)&quot;"
           WorkingDirectory="$(_DebuggeeDir)" />
 
     <MakeDir Directories="$(_DumpDir)" />
