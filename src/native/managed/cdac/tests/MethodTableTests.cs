@@ -848,7 +848,7 @@ public class MethodTableTests
         Contracts.TypeHandle typeHandle = contract.GetTypeHandle(mtPtr);
         Assert.True(contract.ContainsGCPointers(typeHandle));
 
-        (uint Offset, uint Size)[] series = contract.GetGCDescSeries(typeHandle).ToArray();
+        (uint Offset, uint Size)[] series = contract.GetGCDescSeries(typeHandle, 1).ToArray();
         Assert.Single(series);
         Assert.Equal(expectedOffset, series[0].Offset);
         Assert.Equal(expectedSize, series[0].Size);
@@ -874,6 +874,7 @@ public class MethodTableTests
                 uint baseSize = helpers.ObjHeaderSize + 3u * pointerSize;
 
                 uint skip = 2u * pointerSize; // two pointer-sized non-ref fields between runs
+                uint elementSize = 2u * pointerSize + skip + pointerSize; // total size of one struct element
 
                 MockEEClass eeClass = rtsBuilder.AddEEClass("ValueClassArray_2runs");
                 MockMethodTable mt = rtsBuilder.AddMethodTableWithValueClassGCDesc(
@@ -881,7 +882,7 @@ public class MethodTableTests
                     baseSize,
                     startOffset,
                     [(2, skip), (1, 0)]); // first: 2 ptrs then skip, second: 1 ptr no skip
-                mt.MTFlags |= 0x01000000u; // ContainsGCPointers
+                mt.MTFlags = (uint)(MethodTableFlags_1.WFLAGS_HIGH.HasComponentSize | MethodTableFlags_1.WFLAGS_HIGH.ContainsGCPointers) | elementSize;
                 mt.ParentMethodTable = rtsBuilder.SystemObjectMethodTable.Address;
                 mt.NumVirtuals = 3;
                 eeClass.MethodTable = mt.Address;
@@ -898,7 +899,7 @@ public class MethodTableTests
         IRuntimeTypeSystem contract = target.Contracts.RuntimeTypeSystem;
         Contracts.TypeHandle typeHandle = contract.GetTypeHandle(mtPtr);
 
-        (uint Offset, uint Size)[] series = contract.GetGCDescSeries(typeHandle).ToArray();
+        (uint Offset, uint Size)[] series = contract.GetGCDescSeries(typeHandle, 1).ToArray();
         Assert.Equal(expectedSeries.Length, series.Length);
         for (int i = 0; i < expectedSeries.Length; i++)
         {
