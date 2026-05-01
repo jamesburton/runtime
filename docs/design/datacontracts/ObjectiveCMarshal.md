@@ -17,36 +17,20 @@ Data descriptors used:
 | Data Descriptor Name | Field | Meaning |
 | --- | --- | --- |
 | `InteropSyncBlockInfo` | `TaggedMemory` | Pointer to the tagged memory for the object (if it exists) |
-| `Object` | `m_pMethTab` | Method table for the object |
-| `ObjectHeader` | `SyncBlockValue` | Sync block value for the object header |
 
 Contracts used:
 | Contract Name |
 | --- |
-| `SyncBlock` |
-
-Globals used:
-| Global Name | Type | Purpose |
-| --- | --- | --- |
-| `SyncBlockIsHashOrSyncBlockIndex` | uint32 | Bitmask: set if sync block value is a hash code or sync block index |
-| `SyncBlockIsHashCode` | uint32 | Bitmask: set if sync block value is a hash code |
-| `SyncBlockIndexMask` | uint32 | Mask to extract the sync block index from the sync block value |
+| `Object` |
 
 ``` csharp
 TargetPointer GetTaggedMemory(TargetPointer address, out TargetNUInt size)
 {
     size = default;
 
-    ulong objectHeaderSize = /* ObjectHeader size */;
-    uint syncBlockValue = target.Read<uint>(address - objectHeaderSize + /* ObjectHeader::SyncBlockValue offset */);
-
-    // Check if the sync block value represents a sync block index
-    if ((syncBlockValue & (SyncBlockIsHashCode | SyncBlockIsHashOrSyncBlockIndex))
-            != SyncBlockIsHashOrSyncBlockIndex)
+    TargetPointer syncBlockPtr = target.Contracts.Object.GetSyncBlockAddress(address);
+    if (syncBlockPtr == TargetPointer.Null)
         return TargetPointer.Null;
-
-    uint index = syncBlockValue & SyncBlockIndexMask;
-    TargetPointer syncBlockPtr = target.Contracts.SyncBlock.GetSyncBlock(index);
 
     TargetPointer interopInfoPtr = target.ReadPointer(syncBlockPtr + /* SyncBlock::InteropInfo offset */);
     if (interopInfoPtr == TargetPointer.Null)

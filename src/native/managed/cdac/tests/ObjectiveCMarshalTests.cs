@@ -28,6 +28,7 @@ public class ObjectiveCMarshalTests
             .AddTypes(CreateContractTypes(objectBuilder))
             .AddGlobals(CreateContractGlobals(objectBuilder))
             .AddContract<IObjectiveCMarshal>(version: "c1")
+            .AddContract<IObject>(version: "c1")
             .AddContract<ISyncBlock>(version: "c1");
 
         return targetBuilder.Build();
@@ -46,11 +47,14 @@ public class ObjectiveCMarshalTests
     private static (string Name, ulong Value)[] CreateContractGlobals(MockDescriptors.MockObjectBuilder objectBuilder)
         =>
         [
+            (nameof(Constants.Globals.ObjectToMethodTableUnmask), MockDescriptors.MockObjectBuilder.TestObjectToMethodTableUnmask),
+            (nameof(Constants.Globals.StringMethodTable), MockDescriptors.MockObjectBuilder.TestStringMethodTableGlobalAddress),
             (nameof(Constants.Globals.SyncTableEntries), MockDescriptors.MockObjectBuilder.TestSyncTableEntriesGlobalAddress),
             (nameof(Constants.Globals.SyncBlockValueToObjectOffset), MockDescriptors.MockObjectBuilder.TestSyncBlockValueToObjectOffset),
             (nameof(Constants.Globals.SyncBlockIsHashOrSyncBlockIndex), SyncBlockIsHashOrSyncBlockIndex),
             (nameof(Constants.Globals.SyncBlockIsHashCode), SyncBlockIsHashCode),
             (nameof(Constants.Globals.SyncBlockIndexMask), SyncBlockIndexMask),
+            (nameof(Constants.Globals.SyncBlockHashCodeMask), SyncBlockIndexMask),
         ];
 
     [Theory]
