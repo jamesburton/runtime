@@ -22,7 +22,7 @@ public class ObjectiveCMarshalTests
         MockDescriptors.RuntimeTypeSystem rtsBuilder = new(targetBuilder.MemoryBuilder);
         MockDescriptors.MockObjectBuilder objectBuilder = new(rtsBuilder);
 
-        configure?.Invoke(objectBuilder);
+        configure(objectBuilder);
 
         targetBuilder
             .AddTypes(CreateContractTypes(objectBuilder))
