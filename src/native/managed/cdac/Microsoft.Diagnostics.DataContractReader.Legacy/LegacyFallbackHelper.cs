@@ -5,7 +5,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace Microsoft.Diagnostics.DataContractReader.Legacy;
 
@@ -28,12 +27,6 @@ internal static class LegacyFallbackHelper
 
         // IXCLRDataModule — not yet implemented in the cDAC.
         nameof(IXCLRDataModule.GetMethodDefinitionByToken),
-
-        // GC heap analysis — not yet implemented in the cDAC (PR #125895).
-        nameof(ISOSDacInterface11.IsTrackedType),
-
-        // Loader heap traversal — not yet implemented in the cDAC (PR #125129).
-        nameof(ISOSDacInterface.TraverseLoaderHeap),
     };
 
     // Files whose methods are all allowed to fall back.
