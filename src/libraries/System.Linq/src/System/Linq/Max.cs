@@ -3,22 +3,19 @@
 
 using System.Collections.Generic;
 using System.Numerics;
-using System.Runtime.Intrinsics;
 
 namespace System.Linq
 {
     public static partial class Enumerable
     {
-        public static int Max(this IEnumerable<int> source) => MinMaxInteger<int, MaxCalc<int>>(source);
+        public static int Max(this IEnumerable<int> source) => MinMaxInteger<int, MaxOp<int>>(source);
 
-        public static long Max(this IEnumerable<long> source) => MinMaxInteger<long, MaxCalc<long>>(source);
+        public static long Max(this IEnumerable<long> source) => MinMaxInteger<long, MaxOp<long>>(source);
 
-        private readonly struct MaxCalc<T> : IMinMaxCalc<T> where T : struct, IBinaryInteger<T>
+        private readonly struct MaxOp<T> : IMinMaxOperator<T> where T : struct, IBinaryInteger<T>
         {
             public static bool Compare(T left, T right) => left > right;
-            public static Vector128<T> Compare(Vector128<T> left, Vector128<T> right) => Vector128.Max(left, right);
-            public static Vector256<T> Compare(Vector256<T> left, Vector256<T> right) => Vector256.Max(left, right);
-            public static Vector512<T> Compare(Vector512<T> left, Vector512<T> right) => Vector512.Max(left, right);
+            public static T Invoke(ReadOnlySpan<T> span) => span.Max()!;
         }
 
         public static int? Max(this IEnumerable<int?> source) => MaxInteger(source);
@@ -109,23 +106,7 @@ namespace System.Linq
                     ThrowHelper.ThrowNoElementsException();
                 }
 
-                int i;
-                for (i = 0; i < span.Length && T.IsNaN(span[i]); i++) ;
-
-                if (i == span.Length)
-                {
-                    return span[^1];
-                }
-
-                for (value = span[i]; (uint)i < (uint)span.Length; i++)
-                {
-                    if (span[i] > value)
-                    {
-                        value = span[i];
-                    }
-                }
-
-                return value;
+                return span.Max()!;
             }
 
             using IEnumerator<T> e = source.GetEnumerator();
@@ -320,19 +301,19 @@ namespace System.Linq
             comparer ??= Comparer<TSource>.Default;
 
             // TODO https://github.com/dotnet/csharplang/discussions/6308: Update this to use generic constraint bridging if/when available.
-            if (typeof(TSource) == typeof(byte) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<byte, MaxCalc<byte>>((IEnumerable<byte>)source);
-            if (typeof(TSource) == typeof(sbyte) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<sbyte, MaxCalc<sbyte>>((IEnumerable<sbyte>)source);
-            if (typeof(TSource) == typeof(ushort) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<ushort, MaxCalc<ushort>>((IEnumerable<ushort>)source);
-            if (typeof(TSource) == typeof(short) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<short, MaxCalc<short>>((IEnumerable<short>)source);
-            if (typeof(TSource) == typeof(char) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<char, MaxCalc<char>>((IEnumerable<char>)source);
-            if (typeof(TSource) == typeof(uint) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<uint, MaxCalc<uint>>((IEnumerable<uint>)source);
-            if (typeof(TSource) == typeof(int) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<int, MaxCalc<int>>((IEnumerable<int>)source);
-            if (typeof(TSource) == typeof(ulong) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<ulong, MaxCalc<ulong>>((IEnumerable<ulong>)source);
-            if (typeof(TSource) == typeof(long) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<long, MaxCalc<long>>((IEnumerable<long>)source);
-            if (typeof(TSource) == typeof(nuint) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<nuint, MaxCalc<nuint>>((IEnumerable<nuint>)source);
-            if (typeof(TSource) == typeof(nint) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<nint, MaxCalc<nint>>((IEnumerable<nint>)source);
-            if (typeof(TSource) == typeof(Int128) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<Int128, MaxCalc<Int128>>((IEnumerable<Int128>)source);
-            if (typeof(TSource) == typeof(UInt128) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<UInt128, MaxCalc<UInt128>>((IEnumerable<UInt128>)source);
+            if (typeof(TSource) == typeof(byte) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<byte, MaxOp<byte>>((IEnumerable<byte>)source);
+            if (typeof(TSource) == typeof(sbyte) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<sbyte, MaxOp<sbyte>>((IEnumerable<sbyte>)source);
+            if (typeof(TSource) == typeof(ushort) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<ushort, MaxOp<ushort>>((IEnumerable<ushort>)source);
+            if (typeof(TSource) == typeof(short) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<short, MaxOp<short>>((IEnumerable<short>)source);
+            if (typeof(TSource) == typeof(char) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<char, MaxOp<char>>((IEnumerable<char>)source);
+            if (typeof(TSource) == typeof(uint) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<uint, MaxOp<uint>>((IEnumerable<uint>)source);
+            if (typeof(TSource) == typeof(int) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<int, MaxOp<int>>((IEnumerable<int>)source);
+            if (typeof(TSource) == typeof(ulong) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<ulong, MaxOp<ulong>>((IEnumerable<ulong>)source);
+            if (typeof(TSource) == typeof(long) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<long, MaxOp<long>>((IEnumerable<long>)source);
+            if (typeof(TSource) == typeof(nuint) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<nuint, MaxOp<nuint>>((IEnumerable<nuint>)source);
+            if (typeof(TSource) == typeof(nint) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<nint, MaxOp<nint>>((IEnumerable<nint>)source);
+            if (typeof(TSource) == typeof(Int128) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<Int128, MaxOp<Int128>>((IEnumerable<Int128>)source);
+            if (typeof(TSource) == typeof(UInt128) && comparer == Comparer<TSource>.Default) return (TSource)(object)MinMaxInteger<UInt128, MaxOp<UInt128>>((IEnumerable<UInt128>)source);
 
             TSource? value = default;
             using IEnumerator<TSource> e = source.GetEnumerator();

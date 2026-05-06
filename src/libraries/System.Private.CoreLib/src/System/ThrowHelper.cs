@@ -543,6 +543,12 @@ namespace System
         }
 
         [DoesNotReturn]
+        internal static void ThrowInvalidOperationException_NoElements()
+        {
+            throw new InvalidOperationException(SR.InvalidOperation_NoElements);
+        }
+
+        [DoesNotReturn]
         internal static void ThrowInvalidOperationException_EnumCurrent(int index)
         {
             throw GetInvalidOperationException_EnumCurrent(index);

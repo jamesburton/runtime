@@ -2644,6 +2644,9 @@
   <data name="InvalidOperation_EnumEnded" xml:space="preserve">
     <value>Enumeration already finished.</value>
   </data>
+  <data name="InvalidOperation_NoElements" xml:space="preserve">
+    <value>Sequence contains no elements.</value>
+  </data>
   <data name="InvalidOperation_EnumFailedVersion" xml:space="preserve">
     <value>Collection was modified; enumeration operation may not execute.</value>
   </data>
