@@ -126,6 +126,7 @@
     <Compile Include="Span\SequenceEqual.T.cs" />
     <Compile Include="Span\Slice.cs" />
     <Compile Include="Span\Sort.cs" />
+    <Compile Include="Span\MinMax.cs" />
     <Compile Include="Span\StartsWith.byte.cs" />
     <Compile Include="Span\StartsWith.char.cs" />
     <Compile Include="Span\StartsWith.long.cs" />

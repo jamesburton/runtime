@@ -58,7 +58,7 @@ namespace System
                 if (typeof(T) == typeof(Half)) return (T)(object)MinFloatCore(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<T, Half>(ref MemoryMarshal.GetReference(span)), span.Length));
             }
 
-            return MinMaxCore(span, comparer ?? Comparer<T>.Default, sign: -1);
+            return MinMaxCore(span, comparer ?? Comparer<T>.Default, sign: 1);
         }
 
         /// <summary>Returns the maximum value in a span.</summary>
@@ -108,7 +108,7 @@ namespace System
                 if (typeof(T) == typeof(Half)) return (T)(object)MaxFloatCore(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<T, Half>(ref MemoryMarshal.GetReference(span)), span.Length));
             }
 
-            return MinMaxCore(span, comparer ?? Comparer<T>.Default, sign: 1);
+            return MinMaxCore(span, comparer ?? Comparer<T>.Default, sign: -1);
         }
 
         /// <summary>Core implementation for Min/Max over a span using IComparer.</summary>
