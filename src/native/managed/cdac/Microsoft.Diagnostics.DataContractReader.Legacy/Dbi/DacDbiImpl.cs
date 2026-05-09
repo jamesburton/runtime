@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -64,19 +63,6 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
         _legacy = legacyObj as IDacDbiInterface;
     }
 
-    // DebuggerIPCE_ExpandedTypeData is 40 bytes on 64-bit targets and 24 bytes on 32-bit targets.
-    private const int ExpandedTypeDataSize64 = 40;
-    private const int ExpandedTypeDataSize32 = 24;
-    // DebuggerIPCE_BasicTypeData starts with Portable<CorElementType> + Portable<mdTypeDef>.
-    private const int BasicTypeDataHeaderSize = sizeof(int) + sizeof(uint);
-
-    private int ExpandedTypeDataSize => _target.PointerSize == sizeof(ulong) ? ExpandedTypeDataSize64 : ExpandedTypeDataSize32;
-    private int ExpandedTypeDataUnionOffset => _target.PointerSize;
-    private int ExpandedClassTypeDataVmAssemblyOffset => ExpandedTypeDataUnionOffset + AlignUp(sizeof(uint), _target.PointerSize);
-    private int BasicTypeDataSize => BasicTypeDataHeaderSize + (_target.PointerSize * 2);
-
-    private static int AlignUp(int value, int alignment) => ((value + alignment - 1) / alignment) * alignment;
-
     private static AreValueTypesBoxed ValidateBoxedValue(int boxed)
         => boxed switch
         {
@@ -85,29 +71,6 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
             (int)AreValueTypesBoxed.AllBoxed => AreValueTypesBoxed.AllBoxed,
             _ => throw new ArgumentOutOfRangeException(nameof(boxed)),
         };
-
-    private void WriteTargetPointerLittleEndian(Span<byte> destination, ulong value)
-    {
-        if (_target.PointerSize == sizeof(uint))
-        {
-            if ((value >> 32) != 0)
-                throw new OverflowException($"Pointer value 0x{value:X} does not fit target pointer size {_target.PointerSize}");
-            BinaryPrimitives.WriteUInt32LittleEndian(destination, (uint)value);
-        }
-        else
-        {
-            BinaryPrimitives.WriteUInt64LittleEndian(destination, value);
-        }
-    }
-
-    private void WriteBasicTypeData(Span<byte> destination, CorElementType elementType, uint metadataToken, ulong vmAssembly, ulong vmTypeHandle)
-    {
-        destination.Clear();
-        BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(0, sizeof(int)), (int)elementType);
-        BinaryPrimitives.WriteUInt32LittleEndian(destination.Slice(sizeof(int), sizeof(uint)), metadataToken);
-        WriteTargetPointerLittleEndian(destination.Slice(BasicTypeDataHeaderSize, _target.PointerSize), vmAssembly);
-        WriteTargetPointerLittleEndian(destination.Slice(BasicTypeDataHeaderSize + _target.PointerSize, _target.PointerSize), vmTypeHandle);
-    }
 
     private bool TryGetObjectMethodTable(out TargetPointer objectMethodTable)
     {
@@ -159,38 +122,37 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
         return (metadataToken, vmAssembly, vmTypeHandle);
     }
 
-    private void GetBasicTypeData(Contracts.IRuntimeTypeSystem rts, TypeHandle typeHandle, out CorElementType elementType, out uint metadataToken, out ulong vmAssembly, out ulong vmTypeHandle)
+    private DebuggerIPCE_BasicTypeData GetBasicTypeData(Contracts.IRuntimeTypeSystem rts, TypeHandle typeHandle)
     {
-        elementType = GetElementType(rts, typeHandle);
-        metadataToken = 0;
-        vmAssembly = 0;
-        vmTypeHandle = 0;
+        DebuggerIPCE_BasicTypeData data = default;
+        data.elementType = GetElementType(rts, typeHandle);
 
-        switch (elementType)
+        switch (data.elementType)
         {
             case CorElementType.Array:
             case CorElementType.SzArray:
             case CorElementType.FnPtr:
             case CorElementType.Ptr:
             case CorElementType.Byref:
-                vmTypeHandle = typeHandle.Address.Value;
+                data.vmTypeHandle = typeHandle.Address.Value;
                 break;
             case CorElementType.Class:
             case CorElementType.ValueType:
-                (metadataToken, vmAssembly, vmTypeHandle) = GetClassTypeData(rts, typeHandle);
+                (data.metadataToken, data.vmAssembly, data.vmTypeHandle) = GetClassTypeData(rts, typeHandle);
                 break;
         }
+
+        return data;
     }
 
-    private void WriteExpandedTypeData(int boxed, TypeHandle typeHandle, Span<byte> destination)
+    private void WriteExpandedTypeData(int boxed, TypeHandle typeHandle, DebuggerIPCE_ExpandedTypeData* pData)
     {
         AreValueTypesBoxed boxedBehavior = ValidateBoxedValue(boxed);
         Contracts.IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
-        destination.Clear();
+        *pData = default;
 
         CorElementType elementType = GetElementType(rts, typeHandle);
-        int unionOffset = ExpandedTypeDataUnionOffset;
-        BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(0, sizeof(int)), (int)elementType);
+        pData->elementType = elementType;
 
         switch (elementType)
         {
@@ -198,13 +160,12 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
             case CorElementType.SzArray:
                 {
                     TypeHandle arrayElementType = rts.GetTypeParam(typeHandle);
-                    GetBasicTypeData(rts, arrayElementType, out CorElementType arrayElementCorType, out uint arrayElementMetadataToken, out ulong arrayElementVmAssembly, out ulong arrayElementVmTypeHandle);
-                    WriteBasicTypeData(destination.Slice(unionOffset, BasicTypeDataSize), arrayElementCorType, arrayElementMetadataToken, arrayElementVmAssembly, arrayElementVmTypeHandle);
+                    pData->ArrayTypeData.arrayTypeArg = GetBasicTypeData(rts, arrayElementType);
                     bool isArray = rts.IsArray(typeHandle, out uint rank);
                     Debug.Assert(isArray);
                     if (!isArray)
                         throw new InvalidOperationException($"TypeHandle 0x{typeHandle.Address.Value:X} is not an array type.");
-                    BinaryPrimitives.WriteUInt32LittleEndian(destination.Slice(unionOffset + BasicTypeDataSize, sizeof(uint)), rank);
+                    pData->ArrayTypeData.arrayRank = rank;
                     break;
                 }
             case CorElementType.Ptr:
@@ -212,46 +173,44 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
                 if (boxedBehavior == AreValueTypesBoxed.AllBoxed)
                 {
                     elementType = CorElementType.Class;
-                    BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(0, sizeof(int)), (int)elementType);
+                    pData->elementType = elementType;
                     goto case CorElementType.Class;
                 }
                 else
                 {
                     TypeHandle referentType = rts.GetTypeParam(typeHandle);
-                    GetBasicTypeData(rts, referentType, out CorElementType unaryCorType, out uint unaryMetadataToken, out ulong unaryVmAssembly, out ulong unaryVmTypeHandle);
-                    WriteBasicTypeData(destination.Slice(unionOffset, BasicTypeDataSize), unaryCorType, unaryMetadataToken, unaryVmAssembly, unaryVmTypeHandle);
+                    pData->UnaryTypeData.unaryTypeArg = GetBasicTypeData(rts, referentType);
                     break;
                 }
             case CorElementType.ValueType:
                 if (boxedBehavior is AreValueTypesBoxed.OnlyPrimitivesUnboxed or AreValueTypesBoxed.AllBoxed)
                 {
                     elementType = CorElementType.Class;
-                    BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(0, sizeof(int)), (int)elementType);
+                    pData->elementType = elementType;
                 }
                 goto case CorElementType.Class;
             case CorElementType.Class:
                 {
                     (uint metadataToken, ulong vmAssembly, ulong vmTypeHandle) = GetClassTypeData(rts, typeHandle);
-                    BinaryPrimitives.WriteUInt32LittleEndian(destination.Slice(unionOffset, sizeof(uint)), metadataToken);
-                    int vmAssemblyOffset = ExpandedClassTypeDataVmAssemblyOffset;
-                    WriteTargetPointerLittleEndian(destination.Slice(vmAssemblyOffset, _target.PointerSize), vmAssembly);
-                    WriteTargetPointerLittleEndian(destination.Slice(vmAssemblyOffset + _target.PointerSize, _target.PointerSize), vmTypeHandle);
+                    pData->ClassTypeData.metadataToken = metadataToken;
+                    pData->ClassTypeData.vmAssembly = vmAssembly;
+                    pData->ClassTypeData.typeHandle = vmTypeHandle;
                     break;
                 }
             case CorElementType.FnPtr:
                 if (boxedBehavior == AreValueTypesBoxed.AllBoxed)
                 {
                     elementType = CorElementType.Class;
-                    BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(0, sizeof(int)), (int)elementType);
+                    pData->elementType = elementType;
                     goto case CorElementType.Class;
                 }
-                WriteTargetPointerLittleEndian(destination.Slice(unionOffset, _target.PointerSize), typeHandle.Address.Value);
+                pData->NaryTypeData.typeHandle = typeHandle.Address.Value;
                 break;
             default:
                 if (boxedBehavior == AreValueTypesBoxed.AllBoxed)
                 {
                     elementType = CorElementType.Class;
-                    BinaryPrimitives.WriteInt32LittleEndian(destination.Slice(0, sizeof(int)), (int)elementType);
+                    pData->elementType = elementType;
                     goto case CorElementType.Class;
                 }
                 break;
@@ -1479,16 +1438,16 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
     public int GetInstantiationFieldInfo(ulong vmAssembly, ulong vmTypeHandle, ulong vmExactMethodTable, nint pFieldList, nuint* pObjectSize)
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetInstantiationFieldInfo(vmAssembly, vmTypeHandle, vmExactMethodTable, pFieldList, pObjectSize) : HResults.E_NOTIMPL;
 
-    public int TypeHandleToExpandedTypeInfo(int boxed, ulong vmTypeHandle, nint pData)
+    public int TypeHandleToExpandedTypeInfo(int boxed, ulong vmTypeHandle, DebuggerIPCE_ExpandedTypeData* pData)
     {
         int hr = HResults.S_OK;
         try
         {
-            if (pData == nint.Zero)
+            if (pData == null)
                 throw new ArgumentNullException(nameof(pData));
             Contracts.IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
             TypeHandle typeHandle = rts.GetTypeHandle(new TargetPointer(vmTypeHandle));
-            WriteExpandedTypeData(boxed, typeHandle, new Span<byte>((void*)pData, ExpandedTypeDataSize));
+            WriteExpandedTypeData(boxed, typeHandle, pData);
         }
         catch (System.Exception ex)
         {
@@ -1497,35 +1456,32 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
 #if DEBUG
         if (_legacy is not null)
         {
-            Span<byte> localData = stackalloc byte[ExpandedTypeDataSize];
-            localData.Clear();
-            fixed (byte* pLocalData = localData)
+            DebuggerIPCE_ExpandedTypeData localData = default;
+            int hrLocal = _legacy.TypeHandleToExpandedTypeInfo(boxed, vmTypeHandle, &localData);
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK)
             {
-                int hrLocal = _legacy.TypeHandleToExpandedTypeInfo(boxed, vmTypeHandle, (nint)pLocalData);
-                Debug.ValidateHResult(hr, hrLocal);
-                if (hr == HResults.S_OK)
-                {
-                    ReadOnlySpan<byte> data = new ReadOnlySpan<byte>((void*)pData, ExpandedTypeDataSize);
-                    Debug.Assert(data.SequenceEqual(localData), "Expanded type data mismatch");
-                }
+                ReadOnlySpan<byte> data = new ReadOnlySpan<byte>((void*)pData, sizeof(DebuggerIPCE_ExpandedTypeData));
+                ReadOnlySpan<byte> expected = new ReadOnlySpan<byte>((void*)&localData, sizeof(DebuggerIPCE_ExpandedTypeData));
+                Debug.Assert(data.SequenceEqual(expected), "Expanded type data mismatch");
             }
         }
 #endif
         return hr;
     }
 
-    public int GetObjectExpandedTypeInfo(int boxed, ulong addr, nint pTypeInfo)
+    public int GetObjectExpandedTypeInfo(int boxed, ulong addr, DebuggerIPCE_ExpandedTypeData* pTypeInfo)
     {
         int hr = HResults.S_OK;
         try
         {
-            if (pTypeInfo == nint.Zero)
+            if (pTypeInfo == null)
                 throw new ArgumentNullException(nameof(pTypeInfo));
             IObject obj = _target.Contracts.Object;
             Contracts.IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
             TargetPointer methodTable = obj.GetMethodTableAddress(new TargetPointer(addr));
             TypeHandle typeHandle = rts.GetTypeHandle(methodTable);
-            WriteExpandedTypeData(boxed, typeHandle, new Span<byte>((void*)pTypeInfo, ExpandedTypeDataSize));
+            WriteExpandedTypeData(boxed, typeHandle, pTypeInfo);
         }
         catch (System.Exception ex)
         {
@@ -1534,17 +1490,14 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
 #if DEBUG
         if (_legacy is not null)
         {
-            Span<byte> localData = stackalloc byte[ExpandedTypeDataSize];
-            localData.Clear();
-            fixed (byte* pLocalData = localData)
+            DebuggerIPCE_ExpandedTypeData localData = default;
+            int hrLocal = _legacy.GetObjectExpandedTypeInfo(boxed, addr, &localData);
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK)
             {
-                int hrLocal = _legacy.GetObjectExpandedTypeInfo(boxed, addr, (nint)pLocalData);
-                Debug.ValidateHResult(hr, hrLocal);
-                if (hr == HResults.S_OK)
-                {
-                    ReadOnlySpan<byte> data = new ReadOnlySpan<byte>((void*)pTypeInfo, ExpandedTypeDataSize);
-                    Debug.Assert(data.SequenceEqual(localData), "Expanded object type data mismatch");
-                }
+                ReadOnlySpan<byte> data = new ReadOnlySpan<byte>((void*)pTypeInfo, sizeof(DebuggerIPCE_ExpandedTypeData));
+                ReadOnlySpan<byte> expected = new ReadOnlySpan<byte>((void*)&localData, sizeof(DebuggerIPCE_ExpandedTypeData));
+                Debug.Assert(data.SequenceEqual(expected), "Expanded object type data mismatch");
             }
         }
 #endif

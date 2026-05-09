@@ -4,6 +4,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using Microsoft.Diagnostics.DataContractReader.Contracts;
 
 namespace Microsoft.Diagnostics.DataContractReader.Legacy;
 
@@ -135,6 +136,61 @@ public struct COR_FIELD
     public uint offset;
     public COR_TYPEID id;
     public int fieldType;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct DebuggerIPCE_BasicTypeData
+{
+    public CorElementType elementType;
+    public uint metadataToken;
+    public ulong vmAssembly;
+    public ulong vmTypeHandle;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct DebuggerIPCE_ClassTypeData
+{
+    public uint metadataToken;
+    public ulong vmAssembly;
+    public ulong typeHandle;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct DebuggerIPCE_UnaryTypeData
+{
+    public DebuggerIPCE_BasicTypeData unaryTypeArg;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct DebuggerIPCE_ArrayTypeData
+{
+    public DebuggerIPCE_BasicTypeData arrayTypeArg;
+    public uint arrayRank;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct DebuggerIPCE_NaryTypeData
+{
+    public ulong typeHandle;
+}
+
+[StructLayout(LayoutKind.Explicit)]
+public struct DebuggerIPCE_ExpandedTypeData
+{
+    [FieldOffset(0)]
+    public CorElementType elementType;
+
+    [FieldOffset(8)]
+    public DebuggerIPCE_ClassTypeData ClassTypeData;
+
+    [FieldOffset(8)]
+    public DebuggerIPCE_UnaryTypeData UnaryTypeData;
+
+    [FieldOffset(8)]
+    public DebuggerIPCE_ArrayTypeData ArrayTypeData;
+
+    [FieldOffset(8)]
+    public DebuggerIPCE_NaryTypeData NaryTypeData;
 }
 
 #pragma warning restore CS0649
@@ -370,10 +426,10 @@ public unsafe partial interface IDacDbiInterface
     int GetInstantiationFieldInfo(ulong vmAssembly, ulong vmTypeHandle, ulong vmExactMethodTable, nint pFieldList, nuint* pObjectSize);
 
     [PreserveSig]
-    int TypeHandleToExpandedTypeInfo(int boxed, ulong vmTypeHandle, nint pData);
+    int TypeHandleToExpandedTypeInfo(int boxed, ulong vmTypeHandle, DebuggerIPCE_ExpandedTypeData* pData);
 
     [PreserveSig]
-    int GetObjectExpandedTypeInfo(int boxed, ulong addr, nint pTypeInfo);
+    int GetObjectExpandedTypeInfo(int boxed, ulong addr, DebuggerIPCE_ExpandedTypeData* pTypeInfo);
 
     [PreserveSig]
     int GetTypeHandle(ulong vmModule, uint metadataToken, ulong* pRetVal);
