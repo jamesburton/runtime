@@ -138,20 +138,27 @@ public struct COR_FIELD
     public int fieldType;
 }
 
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Explicit)]
 public struct DebuggerIPCE_BasicTypeData
 {
+    [FieldOffset(0)]
     public CorElementType elementType;
+    [FieldOffset(4)]
     public uint metadataToken;
+    [FieldOffset(8)]
     public ulong vmAssembly;
+    [FieldOffset(16)]
     public ulong vmTypeHandle;
 }
 
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Explicit)]
 public struct DebuggerIPCE_ClassTypeData
 {
+    [FieldOffset(0)]
     public uint metadataToken;
+    [FieldOffset(8)]
     public ulong vmAssembly;
+    [FieldOffset(16)]
     public ulong typeHandle;
 }
 
@@ -161,10 +168,12 @@ public struct DebuggerIPCE_UnaryTypeData
     public DebuggerIPCE_BasicTypeData unaryTypeArg;
 }
 
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Explicit)]
 public struct DebuggerIPCE_ArrayTypeData
 {
+    [FieldOffset(0)]
     public DebuggerIPCE_BasicTypeData arrayTypeArg;
+    [FieldOffset(24)]
     public uint arrayRank;
 }
 
@@ -180,6 +189,7 @@ public struct DebuggerIPCE_ExpandedTypeData
     [FieldOffset(0)]
     public CorElementType elementType;
 
+    // Matches native MSLAYOUT alignment where the union begins after elementType.
     [FieldOffset(8)]
     public DebuggerIPCE_ClassTypeData ClassTypeData;
 
