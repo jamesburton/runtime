@@ -2370,7 +2370,11 @@ HRESULT CordbProcess::GetTypeForTypeID(COR_TYPEID id, ICorDebugType **ppType)
     EX_TRY
     {
         DebuggerIPCE_ExpandedTypeData data;
-        IfFailThrow(GetDAC()->GetObjectExpandedTypeInfoFromID(AllBoxed, id, &data));
+        VMPTR_TypeHandle vmTypeHandle = VMPTR_TypeHandle::NullPtr();
+        static_assert(sizeof(vmTypeHandle) == sizeof(id.token1), "COR_TYPEID::token1 must match VMPTR_TypeHandle size");
+        // COR_TYPEID token1 stores the underlying TypeHandle pointer value.
+        memcpy(&vmTypeHandle, &id.token1, sizeof(vmTypeHandle));
+        IfFailThrow(GetDAC()->TypeHandleToExpandedTypeInfo(AllBoxed, vmTypeHandle, &data));
 
         CordbType *type = 0;
         hr = CordbType::TypeDataToType(GetAppDomain(), &data, &type);

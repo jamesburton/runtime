@@ -1554,8 +1554,6 @@ public:
     virtual HRESULT STDMETHODCALLTYPE GetObjectExpandedTypeInfo(AreValueTypesBoxed boxed, CORDB_ADDRESS addr, OUT DebuggerIPCE_ExpandedTypeData * pTypeInfo) = 0;
 
 
-    virtual HRESULT STDMETHODCALLTYPE GetObjectExpandedTypeInfoFromID(AreValueTypesBoxed boxed, COR_TYPEID id, OUT DebuggerIPCE_ExpandedTypeData * pTypeInfo) = 0;
-
 
     // Get type handle for a TypeDef token, if one exists. For generics this returns the open type.
     // Note there is no guarantee the returned handle will be fully restored (in pre-jit scenarios),

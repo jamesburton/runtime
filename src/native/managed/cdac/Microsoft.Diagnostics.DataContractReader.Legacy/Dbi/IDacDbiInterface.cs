@@ -376,9 +376,6 @@ public unsafe partial interface IDacDbiInterface
     int GetObjectExpandedTypeInfo(int boxed, ulong addr, nint pTypeInfo);
 
     [PreserveSig]
-    int GetObjectExpandedTypeInfoFromID(int boxed, COR_TYPEID id, nint pTypeInfo);
-
-    [PreserveSig]
     int GetTypeHandle(ulong vmModule, uint metadataToken, ulong* pRetVal);
 
     [PreserveSig]

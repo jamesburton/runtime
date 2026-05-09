@@ -2513,20 +2513,6 @@ void DacDbiInterfaceImpl::TypeHandleToBasicTypeInfo(TypeHandle                  
 } // DacDbiInterfaceImpl::TypeHandleToBasicTypeInfo
 
 
-HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::GetObjectExpandedTypeInfoFromID(AreValueTypesBoxed boxed, COR_TYPEID id, OUT DebuggerIPCE_ExpandedTypeData * pTypeInfo)
-{
-    DD_ENTER_MAY_THROW;
-
-    HRESULT hr = S_OK;
-    EX_TRY
-    {
-
-        TypeHandleToExpandedTypeInfoImpl(boxed, TypeHandle::FromPtr(TO_TADDR(id.token1)), pTypeInfo);
-    }
-    EX_CATCH_HRESULT(hr);
-    return hr;
-}
-
 HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::GetObjectExpandedTypeInfo(AreValueTypesBoxed boxed, CORDB_ADDRESS addr, OUT DebuggerIPCE_ExpandedTypeData * pTypeInfo)
 {
     DD_ENTER_MAY_THROW;
