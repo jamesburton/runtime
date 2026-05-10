@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Diagnostics.DataContractReader.ExecutionManagerHelpers;
 using Microsoft.Diagnostics.DataContractReader.Data;
+using Microsoft.Diagnostics.DataContractReader.Contracts.StackWalkHelpers.X86;
 
 namespace Microsoft.Diagnostics.DataContractReader.Contracts;
 
@@ -381,6 +382,48 @@ internal sealed partial class ExecutionManagerCore<T> : IExecutionManager
         jitManager.GetGCInfo(range, codeInfoHandle.Address.Value, out gcInfo, out gcVersion);
     }
 
+    uint IExecutionManager.GetStackParameterSize(CodeBlockHandle codeInfoHandle)
+    {
+        // Mirrors EECodeManager::GetStackParameterSize / ::GetStackParameterSize(hdrInfo*)
+        // in src/coreclr/vm/eetwain.cpp and src/coreclr/vm/gc_unwind_x86.inl.
+        // Stack parameter size is only meaningful on x86; on every other architecture
+        // the C++ implementation returns 0.
+        IExecutionManager eman = this;
+        if (_target.Contracts.RuntimeInfo.GetTargetArchitecture() != RuntimeInfoArchitecture.X86)
+        {
+            return 0;
+        }
+
+        // Funclets have no stack arguments.
+        if (eman.IsFunclet(codeInfoHandle))
+        {
+            return 0;
+        }
+
+        eman.GetGCInfo(codeInfoHandle, out TargetPointer gcInfoAddress, out _);
+        if (gcInfoAddress == TargetPointer.Null)
+        {
+            throw new InvalidOperationException($"GC info not found for code block {codeInfoHandle.Address}");
+        }
+
+        // Decode the x86 GC info header to read the stack argument size and varargs flag.
+        // This mirrors the construction performed by EECodeInfo::DecodeGCHdrInfo /
+        // crackMethodInfoHdr: read the leading method size (GC-encoded unsigned) and then
+        // decode the InfoHdr that immediately follows.
+        TargetPointer offset = gcInfoAddress;
+        uint methodSize = _target.GCDecodeUnsigned(ref offset);
+        InfoHdr header = InfoHdr.DecodeHeader(_target, ref offset, methodSize);
+
+        // varargs methods are caller-popped, so they report a stack parameter size of 0.
+        // Otherwise return ArgCount * sizeof(int) (matches `infoPtr->argSize = header.argCount * 4;`
+        // in src/coreclr/vm/gc_unwind_x86.inl).
+        if (header.VarArgs)
+        {
+            return 0;
+        }
+
+        return (uint)header.ArgCount * 4u;
+    }
 
     TargetNUInt IExecutionManager.GetRelativeOffset(CodeBlockHandle codeInfoHandle)
     {
