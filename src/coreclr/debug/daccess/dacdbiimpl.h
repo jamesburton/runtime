@@ -311,7 +311,7 @@ public:
         OUT VMPTR_Object *ppTargetObj,
         OUT VMPTR_AppDomain *ppTargetAppDomain);
 
-    HRESULT STDMETHODCALLTYPE GetLoaderHeapMemoryRanges(OUT DacDbiArrayList<COR_MEMORY_RANGE> * pRanges);
+    HRESULT STDMETHODCALLTYPE EnumerateLoaderHeapMemoryRanges(FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback, CALLBACK_DATA pUserData);
 
     HRESULT STDMETHODCALLTYPE IsModuleMapped(VMPTR_Module pModule, OUT BOOL *isModuleMapped);
 
@@ -326,10 +326,12 @@ private:
     // Helper to enumerate all possible memory ranges help by a loader allocator.
     void EnumerateMemRangesForLoaderAllocator(
         PTR_LoaderAllocator pLoaderAllocator,
-        CQuickArrayList<COR_MEMORY_RANGE> *rangeAcummulator);
+        FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback,
+        CALLBACK_DATA pUserData);
 
     void EnumerateMemRangesForJitCodeHeaps(
-        CQuickArrayList<COR_MEMORY_RANGE> *rangeAcummulator);
+        FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback,
+        CALLBACK_DATA pUserData);
 
     // Given a pointer to a managed function, obtain the method desc for it.
     // Equivalent to GetMethodDescPtrFromIp, except if the method isn't jitted

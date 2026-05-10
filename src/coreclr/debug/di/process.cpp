@@ -2475,6 +2475,33 @@ COM_METHOD CordbProcess::EnableGCNotificationEvents(BOOL fEnable)
 //-----------------------------------------------------------
 // ICorDebugProcess11
 //-----------------------------------------------------------
+namespace
+{
+    struct LoaderHeapMemoryRangeAccumulator
+    {
+        CQuickArrayList<COR_MEMORY_RANGE> ranges;
+        BOOL                              fOomHit;
+    };
+
+    void LoaderHeapMemoryRangeCallback(
+        CORDB_ADDRESS rangeStart,
+        CORDB_ADDRESS rangeEnd,
+        IDacDbiInterface::CALLBACK_DATA pUserData)
+    {
+        LoaderHeapMemoryRangeAccumulator *acc =
+            reinterpret_cast<LoaderHeapMemoryRangeAccumulator*>(pUserData);
+
+        // Once OOM has been observed, drop subsequent ranges. The DAC-side walker keeps walking
+        // because the callback is void; the caller surfaces the OOM after the call returns.
+        if (acc->fOomHit)
+            return;
+
+        COR_MEMORY_RANGE r = { rangeStart, rangeEnd };
+        if (!acc->ranges.PushNoThrow(r))
+            acc->fOomHit = TRUE;
+    }
+}
+
 COM_METHOD CordbProcess::EnumerateLoaderHeapMemoryRegions(ICorDebugMemoryRangeEnum **ppRanges)
 {
     VALIDATE_POINTER_TO_OBJECT(ppRanges, ICorDebugMemoryRangeEnum **);
@@ -2484,14 +2511,17 @@ COM_METHOD CordbProcess::EnumerateLoaderHeapMemoryRegions(ICorDebugMemoryRangeEn
 
     PUBLIC_API_BEGIN(this);
     {
-        DacDbiArrayList<COR_MEMORY_RANGE> heapRanges;
+        LoaderHeapMemoryRangeAccumulator acc;
+        acc.fOomHit = FALSE;
 
-        hr = GetDAC()->GetLoaderHeapMemoryRanges(&heapRanges);
+        hr = GetDAC()->EnumerateLoaderHeapMemoryRanges(&LoaderHeapMemoryRangeCallback, &acc);
+        if (SUCCEEDED(hr) && acc.fOomHit)
+            hr = E_OUTOFMEMORY;
 
         if (SUCCEEDED(hr))
         {
             RSInitHolder<CordbMemoryRangeEnumerator> heapSegmentEnumerator(
-                new CordbMemoryRangeEnumerator(this, &heapRanges[0], (DWORD)heapRanges.Count()));
+                new CordbMemoryRangeEnumerator(this, acc.ranges.Ptr(), (DWORD)acc.ranges.Size()));
 
             GetContinueNeuterList()->Add(this, heapSegmentEnumerator);
             heapSegmentEnumerator.TransferOwnershipExternal(ppRanges);

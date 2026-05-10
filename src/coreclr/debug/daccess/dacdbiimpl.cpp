@@ -3515,21 +3515,32 @@ HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::GetDelegateTargetObject(
     return hr;
 }
 
+// Bundle the (callback, user-data) pair into a single PTR_VOID for LoaderHeap::EnumPageRegions,
+// whose tracker callback only accepts a single opaque arg. Lives on the caller's stack.
+struct LoaderHeapMemoryRangeForwardArgs
+{
+    IDacDbiInterface::FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback;
+    IDacDbiInterface::CALLBACK_DATA                       pUserData;
+};
+
 static bool TrackMemoryRangeHelper(PTR_VOID pvArgs, PTR_VOID pvAllocationBase, SIZE_T cbReserved)
 {
-    // The pvArgs is really pointing to a debugger-side container. Sadly the callback only takes a PTR_VOID.
-    CQuickArrayList<COR_MEMORY_RANGE> *rangeCollection =
-                                        (CQuickArrayList<COR_MEMORY_RANGE>*)(dac_cast<TADDR>(pvArgs));
+    LoaderHeapMemoryRangeForwardArgs *pArgs =
+        reinterpret_cast<LoaderHeapMemoryRangeForwardArgs*>(dac_cast<TADDR>(pvArgs));
+
     TADDR rangeStart = dac_cast<TADDR>(pvAllocationBase);
     TADDR rangeEnd = rangeStart + cbReserved;
-    rangeCollection->Push({rangeStart, rangeEnd});
+    pArgs->fpCallback((CORDB_ADDRESS)rangeStart, (CORDB_ADDRESS)rangeEnd, pArgs->pUserData);
 
     // This is a tracking function, not a search callback. Pretend we never found what we were looking for
     // to get all possible ranges.
     return false;
 }
 
-void DacDbiInterfaceImpl::EnumerateMemRangesForLoaderAllocator(PTR_LoaderAllocator pLoaderAllocator, CQuickArrayList<COR_MEMORY_RANGE> *rangeAcummulator)
+void DacDbiInterfaceImpl::EnumerateMemRangesForLoaderAllocator(
+    PTR_LoaderAllocator pLoaderAllocator,
+    FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback,
+    CALLBACK_DATA pUserData)
 {
     CQuickArrayList<PTR_LoaderHeap> heapsToEnumerate;
 
@@ -3555,19 +3566,24 @@ void DacDbiInterfaceImpl::EnumerateMemRangesForLoaderAllocator(PTR_LoaderAllocat
 #endif // FEATURE_VIRTUAL_STUB_DISPATCH
     }
 
-    TADDR rangeAccumAsTaddr = TO_TADDR(rangeAcummulator);
+    LoaderHeapMemoryRangeForwardArgs args = { fpCallback, pUserData };
+    TADDR pArgsAsTaddr = TO_TADDR(&args);
     for (uint32_t i = 0; i < (uint32_t)heapsToEnumerate.Size(); i++)
     {
         LOG((LF_CORDB, LL_INFO10000, "DDBII::EMRFLA: LoaderHeap 0x%x\n", heapsToEnumerate[i].GetAddr()));
-        heapsToEnumerate[i]->EnumPageRegions(TrackMemoryRangeHelper, rangeAccumAsTaddr);
+        heapsToEnumerate[i]->EnumPageRegions(TrackMemoryRangeHelper, pArgsAsTaddr);
     }
 }
 
-void DacDbiInterfaceImpl::EnumerateMemRangesForJitCodeHeaps(CQuickArrayList<COR_MEMORY_RANGE> *rangeAcummulator)
+void DacDbiInterfaceImpl::EnumerateMemRangesForJitCodeHeaps(
+    FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback,
+    CALLBACK_DATA pUserData)
 {
     // We should always have a valid EEJitManager with at least one code heap.
     EEJitManager *pEM = ExecutionManager::GetEEJitManager();
     _ASSERTE(pEM != NULL && pEM->m_pAllCodeHeaps.IsValid());
+
+    LoaderHeapMemoryRangeForwardArgs args = { fpCallback, pUserData };
 
     PTR_HeapList pHeapList = pEM->m_pAllCodeHeaps;
     while (pHeapList != NULL)
@@ -3584,7 +3600,7 @@ void DacDbiInterfaceImpl::EnumerateMemRangesForJitCodeHeaps(CQuickArrayList<COR_
                     "DDBII::EMRFJCH: LoaderCodeHeap 0x%x with LoaderHeap at 0x%x\n",
                     PTR_HOST_TO_TADDR(pHeap), targetLoaderHeap));
                 PTR_ExplicitControlLoaderHeap pLoaderHeap = PTR_ExplicitControlLoaderHeap(targetLoaderHeap);
-                pLoaderHeap->EnumPageRegions(TrackMemoryRangeHelper, TO_TADDR(rangeAcummulator));
+                pLoaderHeap->EnumPageRegions(TrackMemoryRangeHelper, TO_TADDR(&args));
                 break;
             }
 
@@ -3593,10 +3609,10 @@ void DacDbiInterfaceImpl::EnumerateMemRangesForJitCodeHeaps(CQuickArrayList<COR_
                 LOG((LF_CORDB, LL_INFO10000,
                     "DDBII::EMRFJCH: HostCodeHeap 0x%x\n",
                     PTR_HOST_TO_TADDR(pHeap)));
-                rangeAcummulator->Push({
-                    CLRDATA_ADDRESS_TO_TADDR(jitCodeHeapInfo.HostData.baseAddr),
-                    CLRDATA_ADDRESS_TO_TADDR(jitCodeHeapInfo.HostData.currentAddr)
-                });
+                fpCallback(
+                    (CORDB_ADDRESS)CLRDATA_ADDRESS_TO_TADDR(jitCodeHeapInfo.HostData.baseAddr),
+                    (CORDB_ADDRESS)CLRDATA_ADDRESS_TO_TADDR(jitCodeHeapInfo.HostData.currentAddr),
+                    pUserData);
                 break;
             }
 
@@ -3612,17 +3628,20 @@ void DacDbiInterfaceImpl::EnumerateMemRangesForJitCodeHeaps(CQuickArrayList<COR_
     }
 }
 
-HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::GetLoaderHeapMemoryRanges(DacDbiArrayList<COR_MEMORY_RANGE> *pRanges)
+HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::EnumerateLoaderHeapMemoryRanges(
+    FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback,
+    CALLBACK_DATA pUserData)
 {
-    LOG((LF_CORDB, LL_INFO10000, "DDBII::GLHMR\n"));
+    LOG((LF_CORDB, LL_INFO10000, "DDBII::ELHMR\n"));
     DD_ENTER_MAY_THROW;
+
+    if (fpCallback == NULL)
+        return E_POINTER;
 
     HRESULT hr = S_OK;
 
     EX_TRY
     {
-        CQuickArrayList<COR_MEMORY_RANGE> memoryRanges;
-
         // Anything that's loaded in the SystemDomain or into the main AppDomain's default context in .NET Core
         // and after uses only one global allocator. Enumerating that one is enough for most purposes.
         // This doesn't consider any uses of AssemblyLoadingContexts (Unloadable or not). Each context has
@@ -3631,16 +3650,13 @@ HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::GetLoaderHeapMemoryRanges(DacDbiA
         // pointer to the LoaderAllocator tos enumerate.
         PTR_LoaderAllocator pGlobalAllocator = SystemDomain::GetGlobalLoaderAllocator();
         _ASSERTE(pGlobalAllocator);
-        EnumerateMemRangesForLoaderAllocator(pGlobalAllocator, &memoryRanges);
+        EnumerateMemRangesForLoaderAllocator(pGlobalAllocator, fpCallback, pUserData);
 
-        EnumerateMemRangesForJitCodeHeaps(&memoryRanges);
+        EnumerateMemRangesForJitCodeHeaps(fpCallback, pUserData);
 
         // This code doesn't enumerate module thunk heaps to support IJW.
         // It's a fairly rare scenario and requires to enumerate all modules.
         // The return for such added time is minimal.
-
-        _ASSERTE(memoryRanges.Size() < INT_MAX);
-        pRanges->Init(memoryRanges.Ptr(), (UINT) memoryRanges.Size());
     }
     EX_CATCH_HRESULT(hr);
 

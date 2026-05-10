@@ -2273,7 +2273,21 @@ public:
         OUT VMPTR_Object *ppTargetObj,
         OUT VMPTR_AppDomain *ppTargetAppDomain) = 0;
 
-    virtual HRESULT STDMETHODCALLTYPE GetLoaderHeapMemoryRanges(OUT DacDbiArrayList<COR_MEMORY_RANGE> *pRanges) = 0;
+    // Callback invoked for each loader-heap memory range.
+    //
+    // Arguments:
+    //    rangeStart - start address of the range (inclusive).
+    //    rangeEnd   - end address of the range (exclusive).
+    //    pUserData  - user data passed to EnumerateLoaderHeapMemoryRanges.
+    typedef void (*FP_LOADERHEAP_MEMORY_RANGE_CALLBACK)(CORDB_ADDRESS rangeStart, CORDB_ADDRESS rangeEnd, CALLBACK_DATA pUserData);
+
+    // Enumerate the memory ranges held by loader and JIT code heaps.
+    //
+    // The callback is invoked once per range and must not throw. To accumulate ranges, callers
+    // typically stash a buffer (and any failure flag) in pUserData. The walker runs to completion
+    // regardless of any per-range failure the callback decides to record; the caller surfaces the
+    // recorded failure after EnumerateLoaderHeapMemoryRanges returns.
+    virtual HRESULT STDMETHODCALLTYPE EnumerateLoaderHeapMemoryRanges(FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback, CALLBACK_DATA pUserData) = 0;
 
     virtual HRESULT STDMETHODCALLTYPE IsModuleMapped(VMPTR_Module pModule, OUT BOOL *isModuleMapped) = 0;
 

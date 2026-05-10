@@ -144,6 +144,7 @@ typedef void (*FP_ASSEMBLY_ENUMERATION_CALLBACK)(VMPTR_Assembly vmAssembly, CALL
 typedef void (*FP_MODULE_ENUMERATION_CALLBACK)(VMPTR_Assembly vmAssembly, CALLBACK_DATA pUserData);
 typedef void (*FP_THREAD_ENUMERATION_CALLBACK)(VMPTR_Thread vmThread, CALLBACK_DATA pUserData);
 typedef BOOL (*FP_INTERNAL_FRAME_ENUMERATION_CALLBACK)(FramePointer fpFrame, CALLBACK_DATA pUserData);
+typedef void (*FP_LOADERHEAP_MEMORY_RANGE_CALLBACK)(CORDB_ADDRESS rangeStart, CORDB_ADDRESS rangeEnd, CALLBACK_DATA pUserData);
 
 
 //
@@ -430,7 +431,7 @@ interface IDacDbiInterface : IUnknown
         [out] VMPTR_AppDomain * ppTargetAppDomain);
 
     // Loader Heap
-    HRESULT GetLoaderHeapMemoryRanges([out] DacDbiArrayList_COR_MEMORY_RANGE * pRanges);
+    HRESULT EnumerateLoaderHeapMemoryRanges([in] FP_LOADERHEAP_MEMORY_RANGE_CALLBACK fpCallback, [in] CALLBACK_DATA pUserData);
 
     // Module Mapping
     HRESULT IsModuleMapped([in] VMPTR_Module pModule, [out] BOOL * isModuleMapped);
