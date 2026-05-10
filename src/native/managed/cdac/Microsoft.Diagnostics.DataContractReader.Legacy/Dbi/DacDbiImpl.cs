@@ -2124,8 +2124,199 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
     public int GetDelegateTargetObject(int delegateType, ulong delegateObject, ulong* ppTargetObj, ulong* ppTargetAppDomain)
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetDelegateTargetObject(delegateType, delegateObject, ppTargetObj, ppTargetAppDomain) : HResults.E_NOTIMPL;
 
+    // Mirrors the native COR_MEMORY_RANGE struct from cordebug.idl:
+    //   typedef struct _COR_MEMORY_RANGE { CORDB_ADDRESS start; CORDB_ADDRESS end; } COR_MEMORY_RANGE;
+    // The interval is [start, end) (start inclusive, end exclusive).
+    [StructLayout(LayoutKind.Sequential)]
+    private struct COR_MEMORY_RANGE
+    {
+        public ulong Start;
+        public ulong End;
+    }
+
+    // Walks the LoaderHeap block chain starting at the given heap address and pushes
+    // a (start, end) range for each block. Mirrors UnlockedLoaderHeapBaseTraversable::EnumPageRegions
+    // followed by TrackMemoryRangeHelper in dacdbiimpl.cpp.
+    private static void EnumerateLoaderHeapMemRanges(Contracts.ILoader loader, TargetPointer loaderHeap, List<COR_MEMORY_RANGE> ranges)
+    {
+        if (loaderHeap == TargetPointer.Null)
+            return;
+
+        // Defend against pathological cycles - mirrors the iterationMax safeguard in TraverseLoaderHeapCore.
+        const int iterationMax = 8192;
+
+        TargetPointer block = loader.GetFirstLoaderHeapBlock(loaderHeap);
+        TargetPointer firstBlock = block;
+        int i = 0;
+        while (block != TargetPointer.Null && i++ < iterationMax)
+        {
+            Contracts.LoaderHeapBlockData blockData;
+            try
+            {
+                blockData = loader.GetLoaderHeapBlockData(block);
+            }
+            catch (VirtualReadException)
+            {
+                throw new NullReferenceException();
+            }
+
+            ulong start = blockData.Address.Value;
+            ulong end = start + blockData.Size.Value;
+            ranges.Add(new COR_MEMORY_RANGE { Start = start, End = end });
+
+            block = blockData.NextBlock;
+            if (block == firstBlock)
+                throw new NullReferenceException();
+        }
+    }
+
     public int GetLoaderHeapMemoryRanges(nint pRanges)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetLoaderHeapMemoryRanges(pRanges) : HResults.E_NOTIMPL;
+    {
+        int hr = HResults.S_OK;
+        List<COR_MEMORY_RANGE> ranges = new();
+        try
+        {
+            if (pRanges == 0)
+                throw new ArgumentNullException(nameof(pRanges));
+
+            Contracts.ILoader loader = _target.Contracts.Loader;
+            Contracts.IExecutionManager executionManager = _target.Contracts.ExecutionManager;
+
+            // Anything that's loaded in the SystemDomain or into the main AppDomain's default context in .NET Core
+            // and after uses only one global allocator. Enumerating that one is enough for most purposes.
+            // This doesn't consider any uses of AssemblyLoadingContexts (Unloadable or not). Each context has
+            // it's own LoaderAllocator, but there's no easy way of getting a hand at them other than going through
+            // the heap, getting a managed LoaderAllocators, from there getting a Scout, and from there getting a native
+            // pointer to the LoaderAllocator to enumerate.
+            TargetPointer globalAllocator = loader.GetGlobalLoaderAllocator();
+            Debug.Assert(globalAllocator != TargetPointer.Null);
+
+            IReadOnlyDictionary<Contracts.LoaderAllocatorHeapType, TargetPointer> heaps = loader.GetLoaderAllocatorHeaps(globalAllocator);
+
+            // Mirrors EnumerateMemRangesForLoaderAllocator in dacdbiimpl.cpp. The order matches the native
+            // implementation so that the resulting range list ordering is stable.
+            // We always expect to see the LowFrequency, HighFrequency and Stub heaps.
+            TargetPointer lowFrequencyHeap = heaps[Contracts.LoaderAllocatorHeapType.LowFrequencyHeap];
+            Debug.Assert(lowFrequencyHeap != TargetPointer.Null);
+            EnumerateLoaderHeapMemRanges(loader, lowFrequencyHeap, ranges);
+
+            TargetPointer highFrequencyHeap = heaps[Contracts.LoaderAllocatorHeapType.HighFrequencyHeap];
+            Debug.Assert(highFrequencyHeap != TargetPointer.Null);
+            EnumerateLoaderHeapMemRanges(loader, highFrequencyHeap, ranges);
+
+            TargetPointer stubHeap = heaps[Contracts.LoaderAllocatorHeapType.StubHeap];
+            Debug.Assert(stubHeap != TargetPointer.Null);
+            EnumerateLoaderHeapMemRanges(loader, stubHeap, ranges);
+
+            // The VirtualCallStubManager heaps are conditional. The cDAC ILoader contract only adds them
+            // to the dictionary when the corresponding fields are present in the target's data descriptor,
+            // matching the FEATURE_VIRTUAL_STUB_DISPATCH guard in the native implementation.
+            if (heaps.TryGetValue(Contracts.LoaderAllocatorHeapType.IndcellHeap, out TargetPointer indcellHeap)
+                && indcellHeap != TargetPointer.Null)
+            {
+                EnumerateLoaderHeapMemRanges(loader, indcellHeap, ranges);
+            }
+
+            if (heaps.TryGetValue(Contracts.LoaderAllocatorHeapType.CacheEntryHeap, out TargetPointer cacheEntryHeap)
+                && cacheEntryHeap != TargetPointer.Null)
+            {
+                EnumerateLoaderHeapMemRanges(loader, cacheEntryHeap, ranges);
+            }
+
+            // Mirrors EnumerateMemRangesForJitCodeHeaps in dacdbiimpl.cpp.
+            foreach (Contracts.ICodeHeapInfo heapInfo in executionManager.GetCodeHeapInfos())
+            {
+                switch (heapInfo)
+                {
+                    case Contracts.LoaderCodeHeapInfo loaderCodeHeap:
+                        EnumerateLoaderHeapMemRanges(loader, loaderCodeHeap.LoaderHeapAddress, ranges);
+                        break;
+                    case Contracts.HostCodeHeapInfo hostCodeHeap:
+                        ranges.Add(new COR_MEMORY_RANGE
+                        {
+                            Start = hostCodeHeap.BaseAddress.Value,
+                            End = hostCodeHeap.CurrentAddress.Value,
+                        });
+                        break;
+                    default:
+                        Debug.Fail($"Unknown code heap type enumerating code ranges: {heapInfo.GetType()}");
+                        break;
+                }
+            }
+
+            // This code doesn't enumerate module thunk heaps to support IJW.
+            // It's a fairly rare scenario and requires to enumerate all modules.
+            // The return for such added time is minimal.
+
+            Debug.Assert(ranges.Count < int.MaxValue);
+
+            // Populate the output DacDbiArrayList<COR_MEMORY_RANGE>. Native layout is:
+            //   COR_MEMORY_RANGE* m_pList;
+            //   int               m_nEntries;
+            // The caller (CordbProcess::EnumerateLoaderHeapMemoryRegions) constructs an empty
+            // list on the stack, so m_pList/m_nEntries are NULL/0 on entry. The dbi-side
+            // destructor frees m_pList through the IDacDbiInterface::IAllocator implementation
+            // (CordbProcess::Free), which is `delete[] ((BYTE *) p)`. NativeMemory.Alloc
+            // (malloc) is interoperable with that delete[] for trivial-type buffers in the
+            // shared CRT used by cdac and dbi.
+            void* buffer = null;
+            int count = ranges.Count;
+            if (count > 0)
+            {
+                buffer = NativeMemory.Alloc((nuint)count, (nuint)sizeof(COR_MEMORY_RANGE));
+                COR_MEMORY_RANGE* dest = (COR_MEMORY_RANGE*)buffer;
+                for (int j = 0; j < count; j++)
+                {
+                    dest[j] = ranges[j];
+                }
+            }
+
+            *(nint*)pRanges = (nint)buffer;
+            *(int*)((byte*)pRanges + sizeof(nint)) = count;
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+#if DEBUG
+        if (_legacy is not null)
+        {
+            // Allocate a temporary DacDbiArrayList<COR_MEMORY_RANGE> for the legacy implementation
+            // to fill. We can't free the legacy-allocated m_pList from managed code in a
+            // strictly-correct way, so we use NativeMemory.Free which maps to the shared
+            // CRT's free(). This matches what `delete[] ((BYTE *) p)` ultimately calls for
+            // trivial-type buffers in dbi's IAllocator::Free.
+            int legacyListSize = sizeof(nint) + sizeof(int);
+            byte* legacyListBuffer = stackalloc byte[legacyListSize];
+            NativeMemory.Clear(legacyListBuffer, (nuint)legacyListSize);
+
+            int hrLocal = _legacy.GetLoaderHeapMemoryRanges((nint)legacyListBuffer);
+            Debug.ValidateHResult(hr, hrLocal);
+
+            if (hr == HResults.S_OK && hrLocal == HResults.S_OK)
+            {
+                COR_MEMORY_RANGE* legacyRanges = (COR_MEMORY_RANGE*)*(nint*)legacyListBuffer;
+                int legacyCount = *(int*)(legacyListBuffer + sizeof(nint));
+
+                Debug.Assert(legacyCount == ranges.Count,
+                    $"cDAC: {ranges.Count} ranges, DAC: {legacyCount} ranges");
+
+                int compareCount = Math.Min(legacyCount, ranges.Count);
+                for (int k = 0; k < compareCount; k++)
+                {
+                    Debug.Assert(legacyRanges[k].Start == ranges[k].Start && legacyRanges[k].End == ranges[k].End,
+                        $"Range {k} mismatch - cDAC: [0x{ranges[k].Start:x}, 0x{ranges[k].End:x}), DAC: [0x{legacyRanges[k].Start:x}, 0x{legacyRanges[k].End:x})");
+                }
+            }
+
+            // Release the legacy-allocated buffer. See comment above on cross-DLL CRT compatibility.
+            void* legacyPtr = (void*)*(nint*)legacyListBuffer;
+            if (legacyPtr != null)
+                NativeMemory.Free(legacyPtr);
+        }
+#endif
+        return hr;
+    }
 
     public int IsModuleMapped(ulong pModule, Interop.BOOL* isModuleMapped)
     {
