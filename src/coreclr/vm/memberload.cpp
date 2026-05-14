@@ -45,8 +45,140 @@
 #include "generics.h"
 #include "instmethhash.h"
 #include "typestring.h"
+#include "assemblybinder.h"
 
 #ifndef DACCESS_COMPILE
+
+// Walks a TypeHandle (and its generic args, array/byref/pointer element type)
+// looking for the first sub-type whose AssemblyBinder differs from pTargetBinder.
+// Returns true if such a type is found, populating *pMismatch.
+static bool FindAlcMismatchInType(TypeHandle th, AssemblyBinder* pTargetBinder, TypeHandle* pMismatch, DWORD depth = 0)
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        GC_NOTRIGGER;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
+
+    const DWORD maxDepth = 8;
+    if (th.IsNull() || depth > maxDepth)
+        return false;
+
+    // Skip generic variables (T, !!T) - they don't have an associated ALC.
+    if (!th.IsGenericVariable())
+    {
+        Module* pModule = th.GetModule();
+        if (pModule != NULL)
+        {
+            Assembly* pAssembly = pModule->GetAssembly();
+            if (pAssembly != NULL)
+            {
+                PEAssembly* pPE = pAssembly->GetPEAssembly();
+                if (pPE != NULL)
+                {
+                    AssemblyBinder* pBinder = pPE->GetAssemblyBinder();
+                    if (pBinder != NULL && pBinder != pTargetBinder)
+                    {
+                        *pMismatch = th;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Recurse into generic arguments.
+    Instantiation inst = th.GetInstantiation();
+    for (DWORD i = 0; i < inst.GetNumArgs(); i++)
+    {
+        if (FindAlcMismatchInType(inst[i], pTargetBinder, pMismatch, depth + 1))
+            return true;
+    }
+
+    // Recurse into the element type for arrays/byrefs/pointers.
+    if (th.HasTypeParam())
+    {
+        if (FindAlcMismatchInType(th.GetTypeParam(), pTargetBinder, pMismatch, depth + 1))
+            return true;
+    }
+
+    return false;
+}
+
+// Attempts to find an ALC mismatch between pMT's AssemblyLoadContext and the
+// AssemblyLoadContext of one of the types referenced by the method's signature
+// (return type or parameter types). This is used to produce a more helpful
+// MissingMethodException message when the underlying cause is that the signature
+// was resolved in a different ALC than the one containing the declaring type.
+static bool TryFindAlcMismatchInSignature(
+    MethodTable* pMT,
+    PCCOR_SIGNATURE pSig,
+    DWORD cSig,
+    Module* pModule,
+    const SigTypeContext* pTypeContext,
+    TypeHandle* pMismatch,
+    AssemblyBinder** ppTargetBinder)
+{
+    CONTRACTL
+    {
+        THROWS;
+        GC_TRIGGERS;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
+
+    if (pMT == NULL || pSig == NULL || cSig == 0 || pModule == NULL)
+        return false;
+
+    Module* pTargetModule = pMT->GetModule();
+    if (pTargetModule == NULL)
+        return false;
+    Assembly* pTargetAssembly = pTargetModule->GetAssembly();
+    if (pTargetAssembly == NULL)
+        return false;
+    PEAssembly* pTargetPE = pTargetAssembly->GetPEAssembly();
+    if (pTargetPE == NULL)
+        return false;
+    AssemblyBinder* pTargetBinder = pTargetPE->GetAssemblyBinder();
+    if (pTargetBinder == NULL)
+        return false;
+
+    *ppTargetBinder = pTargetBinder;
+
+    bool found = false;
+    EX_TRY
+    {
+        MetaSig msig(pSig, cSig, pModule, pTypeContext);
+        TypeHandle retTH = msig.GetRetTypeHandleNT();
+        if (FindAlcMismatchInType(retTH, pTargetBinder, pMismatch))
+        {
+            found = true;
+        }
+        else
+        {
+            while (msig.NextArg() != ELEMENT_TYPE_END)
+            {
+                TypeHandle argTH = msig.GetLastTypeHandleNT();
+                if (FindAlcMismatchInType(argTH, pTargetBinder, pMismatch))
+                {
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+    EX_CATCH
+    {
+        // Best-effort diagnostic; swallow any failures and fall back to the
+        // standard MissingMethodException message.
+        found = false;
+    }
+    EX_END_CATCH
+
+    return found;
+}
 
 void DECLSPEC_NORETURN MemberLoader::ThrowMissingFieldException(MethodTable* pMT, LPCSTR szMember)
 {
@@ -111,9 +243,68 @@ void DECLSPEC_NORETURN MemberLoader::ThrowMissingMethodException(MethodTable* pM
 
     if (pSig && cSig && pModule && pModule->IsFullModule())
     {
-        MetaSig tmp(pSig, cSig, static_cast<Module*>(pModule), pTypeContext);
+        Module* pFullModule = static_cast<Module*>(pModule);
+
+        // Attempt to detect an AssemblyLoadContext mismatch between the declaring
+        // type and one of the types referenced in the method's signature. When
+        // such a mismatch exists it is usually the underlying cause of the
+        // missing method, and surfacing it in the exception message makes the
+        // problem much easier to diagnose.
+        TypeHandle thMismatch;
+        AssemblyBinder* pTargetBinder = NULL;
+        bool hasAlcMismatch = TryFindAlcMismatchInSignature(
+            pMT, pSig, cSig, pFullModule, pTypeContext, &thMismatch, &pTargetBinder);
+
+        MetaSig tmp(pSig, cSig, pFullModule, pTypeContext);
         SigFormat sf(tmp, szMember, szClassName, NULL);
         MAKE_WIDEPTR_FROMUTF8(szwFullName, sf.GetCString());
+
+        if (hasAlcMismatch)
+        {
+            // Gather diagnostic info for the declaring type and the mismatched type.
+            StackSString sDeclaringTypeName;
+            TypeString::AppendType(sDeclaringTypeName, TypeHandle(pMT), TypeString::FormatNamespace);
+
+            PEAssembly* pDeclaringPE = pMT->GetModule()->GetAssembly()->GetPEAssembly();
+            StackSString sDeclaringAssemblyName;
+            pDeclaringPE->GetDisplayName(sDeclaringAssemblyName);
+            StackSString sDeclaringAlcName;
+            pTargetBinder->GetNameForDiagnostics(sDeclaringAlcName);
+
+            StackSString sMismatchTypeName;
+            TypeString::AppendType(sMismatchTypeName, thMismatch, TypeString::FormatNamespace);
+
+            PEAssembly* pMismatchPE = thMismatch.GetModule()->GetAssembly()->GetPEAssembly();
+            StackSString sMismatchAssemblyName;
+            pMismatchPE->GetDisplayName(sMismatchAssemblyName);
+            StackSString sMismatchAlcName;
+            pMismatchPE->GetAssemblyBinder()->GetNameForDiagnostics(sMismatchAlcName);
+
+            // Pre-format the two detail strings so the outer exception message
+            // stays within the 6-argument limit of EEMessageException.
+            StackSString sDeclaringDetail;
+            StackSString sMismatchDetail;
+            StackSString resStr;
+            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_DETAIL_DECLARING_TYPE))
+            {
+                sDeclaringDetail.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                               sDeclaringTypeName, sDeclaringAssemblyName, sDeclaringAlcName);
+            }
+            resStr.Clear();
+            if (resStr.LoadResource(IDS_EE_MISSING_METHOD_DETAIL_SIGNATURE_TYPE))
+            {
+                sMismatchDetail.FormatMessage(FORMAT_MESSAGE_FROM_STRING, (LPCWSTR)resStr, 0, 0,
+                                              sMismatchTypeName, sMismatchAssemblyName, sMismatchAlcName);
+            }
+
+            EX_THROW(EEMessageException,
+                (kMissingMethodException,
+                 IDS_EE_MISSING_METHOD_WITH_DIFFERENT_ASSEMBLYLOADCONTEXT,
+                 szwFullName,
+                 sDeclaringDetail.GetUnicode(),
+                 sMismatchDetail.GetUnicode()));
+        }
+
         EX_THROW(EEMessageException, (kMissingMethodException, IDS_EE_MISSING_METHOD, szwFullName));
     }
     else
