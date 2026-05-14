@@ -62,6 +62,9 @@ static bool FindAlcMismatchInType(TypeHandle th, AssemblyBinder* pTargetBinder, 
     }
     CONTRACTL_END;
 
+    // Cap recursion depth to avoid runaway walks on pathological generic
+    // nesting. 8 matches the depth limit used in FindFirstDifferingGenericArgument
+    // (see CheckAndThrowSameTypeAndAssemblyInvalidCastException in excep.cpp).
     const DWORD maxDepth = 8;
     if (th.IsNull() || depth > maxDepth)
         return false;
