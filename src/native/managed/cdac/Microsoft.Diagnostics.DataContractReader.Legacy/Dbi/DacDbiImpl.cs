@@ -1448,8 +1448,81 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
     public int IsExceptionObject(ulong vmObject, Interop.BOOL* pResult)
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.IsExceptionObject(vmObject, pResult) : HResults.E_NOTIMPL;
 
-    public int GetStackFramesFromException(ulong vmObject, nint pDacStackFrames)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetStackFramesFromException(vmObject, pDacStackFrames) : HResults.E_NOTIMPL;
+#if DEBUG
+    [ThreadStatic]
+    private static List<(ulong IP, uint MethodDef, Interop.BOOL IsLastForeignExceptionFrame)>? _debugEnumerateStackFramesFromException;
+
+    private static List<(ulong IP, uint MethodDef, Interop.BOOL IsLastForeignExceptionFrame)> DebugEnumerateStackFramesFromException
+        => _debugEnumerateStackFramesFromException ??= new();
+
+    [UnmanagedCallersOnly]
+    private static void EnumerateStackFramesFromExceptionDebugCallback(ulong vmAppDomain, ulong vmAssembly, ulong ip, uint methodDef, Interop.BOOL isLastForeignExceptionFrame, nint _)
+    {
+        DebugEnumerateStackFramesFromException.Add((ip, methodDef, isLastForeignExceptionFrame));
+    }
+#endif
+
+    public int EnumerateStackFramesFromException(ulong vmObject, delegate* unmanaged<ulong, ulong, ulong, uint, Interop.BOOL, nint, void> fpCallback, nint pUserData)
+    {
+        int hr = HResults.S_OK;
+#if DEBUG
+        List<(ulong IP, uint MethodDef, Interop.BOOL IsLastForeignExceptionFrame)> cdacFrames = new();
+#endif
+        try
+        {
+            if (fpCallback is null)
+                throw new ArgumentNullException(nameof(fpCallback));
+
+            // The cDAC Exception contract does not resolve the AppDomain/Assembly for each frame;
+            // the contract emits only (ip, methoddef, isLastForeignExceptionFrame). Pass the
+            // process-wide AppDomain singleton for vmAppDomain and 0 for vmAssembly so that
+            // consumers continue to receive a non-null AppDomain handle.
+            ulong vmAppDomain = _target.ReadPointer(_target.ReadGlobalPointer(Constants.Globals.AppDomain)).Value;
+            const ulong vmAssembly = 0;
+
+            foreach (ExceptionStackFrameData frame in _target.Contracts.Exception.GetExceptionStackFrames(vmObject))
+            {
+                Interop.BOOL isLast = frame.IsLastForeignExceptionFrame ? Interop.BOOL.TRUE : Interop.BOOL.FALSE;
+                fpCallback(vmAppDomain, vmAssembly, frame.IP.Value, frame.MethodDef, isLast, pUserData);
+#if DEBUG
+                cdacFrames.Add((frame.IP.Value, frame.MethodDef, isLast));
+#endif
+            }
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+
+#if DEBUG
+        if (_legacy is not null)
+        {
+            DebugEnumerateStackFramesFromException.Clear();
+            delegate* unmanaged<ulong, ulong, ulong, uint, Interop.BOOL, nint, void> debugCallbackPtr = &EnumerateStackFramesFromExceptionDebugCallback;
+            int hrLocal = _legacy.EnumerateStackFramesFromException(vmObject, debugCallbackPtr, 0);
+            Debug.ValidateHResult(hr, hrLocal);
+
+            if (hr == HResults.S_OK && hrLocal == HResults.S_OK)
+            {
+                List<(ulong IP, uint MethodDef, Interop.BOOL IsLastForeignExceptionFrame)> legacyFrames = DebugEnumerateStackFramesFromException;
+                if (!cdacFrames.SequenceEqual(legacyFrames))
+                {
+                    Debug.Assert(cdacFrames.Count == legacyFrames.Count,
+                        $"cDAC: {cdacFrames.Count} stack frames, DAC: {legacyFrames.Count} stack frames");
+
+                    int compareCount = Math.Min(cdacFrames.Count, legacyFrames.Count);
+                    for (int i = 0; i < compareCount; i++)
+                    {
+                        Debug.Assert(cdacFrames[i] == legacyFrames[i],
+                            $"Stack frame {i} mismatch - cDAC: (ip=0x{cdacFrames[i].IP:x}, methodDef=0x{cdacFrames[i].MethodDef:x}, isLastForeign={cdacFrames[i].IsLastForeignExceptionFrame}), DAC: (ip=0x{legacyFrames[i].IP:x}, methodDef=0x{legacyFrames[i].MethodDef:x}, isLastForeign={legacyFrames[i].IsLastForeignExceptionFrame})");
+                    }
+                }
+            }
+            DebugEnumerateStackFramesFromException.Clear();
+        }
+#endif
+        return hr;
+    }
 
     public int IsRcw(ulong vmObject, Interop.BOOL* pResult)
     {

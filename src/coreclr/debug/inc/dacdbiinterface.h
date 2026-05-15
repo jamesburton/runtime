@@ -1706,8 +1706,26 @@ public:
     // For the specified object, check whether the object derives from System.Exception.
     virtual HRESULT STDMETHODCALLTYPE IsExceptionObject(VMPTR_Object vmObject, OUT BOOL * pResult) = 0;
 
-    // Get the list of raw stack frames for the specified exception object.
-    virtual HRESULT STDMETHODCALLTYPE GetStackFramesFromException(VMPTR_Object vmObject, DacDbiArrayList<DacExceptionCallStackData>* pDacStackFrames) = 0;
+    // Callback invoked for each stack frame of a managed exception's stack trace.
+    //
+    // Arguments:
+    //    vmAppDomain                  - AppDomain the frame's method lives in.
+    //    vmAssembly                   - Assembly the frame's method lives in.
+    //    ip                           - Instruction pointer captured for the frame. Already
+    //                                   adjusted to account for the AMD64 "faulting IP" quirk
+    //                                   on the bottom frame when the runtime did not adjust it
+    //                                   (STEF_IP_ADJUSTED).
+    //    methodDef                    - Metadata token of the method (mdMethodDef).
+    //    isLastForeignExceptionFrame  - TRUE if the frame is the last frame contributed by a
+    //                                   foreign (rethrown / continuation) stack trace.
+    //    pUserData                    - Opaque user data passed to EnumerateStackFramesFromException.
+    typedef void (*FP_EXCEPTIONSTACKFRAME_CALLBACK)(VMPTR_AppDomain vmAppDomain, VMPTR_Assembly vmAssembly, CORDB_ADDRESS ip, mdMethodDef methodDef, BOOL isLastForeignExceptionFrame, CALLBACK_DATA pUserData);
+
+    // Enumerate the raw stack frames for the specified managed exception object, invoking
+    // fpCallback once per frame in stack-trace order. The walker runs to completion regardless
+    // of any per-frame failure the callback decides to record; the caller surfaces any recorded
+    // failure after EnumerateStackFramesFromException returns. The callback must not throw.
+    virtual HRESULT STDMETHODCALLTYPE EnumerateStackFramesFromException(VMPTR_Object vmObject, FP_EXCEPTIONSTACKFRAME_CALLBACK fpCallback, CALLBACK_DATA pUserData) = 0;
 
     // Check whether the argument is a runtime callable wrapper.
     virtual HRESULT STDMETHODCALLTYPE IsRcw(VMPTR_Object vmObject, OUT BOOL * pResult) = 0;

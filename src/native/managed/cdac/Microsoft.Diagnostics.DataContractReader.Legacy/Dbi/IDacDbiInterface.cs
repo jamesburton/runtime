@@ -429,7 +429,7 @@ public unsafe partial interface IDacDbiInterface
     int IsExceptionObject(ulong vmObject, Interop.BOOL* pResult);
 
     [PreserveSig]
-    int GetStackFramesFromException(ulong vmObject, nint pDacStackFrames);
+    int EnumerateStackFramesFromException(ulong vmObject, delegate* unmanaged<ulong, ulong, ulong, uint, Interop.BOOL, nint, void> fpCallback, nint pUserData);
 
     [PreserveSig]
     int IsRcw(ulong vmObject, Interop.BOOL* pResult);

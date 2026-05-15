@@ -1804,6 +1804,8 @@ typedef DPTR(StackTraceElement) PTR_StackTraceElement;
 
 class StackTraceArray
 {
+    friend struct ::cdac_data<StackTraceArray>;
+
     struct ArrayHeader
     {
         uint32_t m_size;
@@ -1977,6 +1979,16 @@ private:
 private:
     // put only things here that can be protected with GCPROTECT
     I1ARRAYREF m_array;
+};
+
+template<>
+struct cdac_data<StackTraceArray>
+{
+    using ArrayHeader = StackTraceArray::ArrayHeader;
+    static constexpr size_t HeaderSize = sizeof(ArrayHeader);
+    static constexpr size_t Size = offsetof(ArrayHeader, m_size);
+    static constexpr size_t KeepAliveItemsCount = offsetof(ArrayHeader, m_keepAliveItemsCount);
+    static constexpr size_t Thread = offsetof(ArrayHeader, m_thread);
 };
 
 #ifdef FEATURE_COLLECTIBLE_TYPES

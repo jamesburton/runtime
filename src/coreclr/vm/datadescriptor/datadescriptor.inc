@@ -189,6 +189,23 @@ CDAC_TYPE_SIZE(sizeof(ArrayBase))
 CDAC_TYPE_FIELD(Array, T_UINT32, m_NumComponents, cdac_data<ArrayBase>::m_NumComponents)
 CDAC_TYPE_END(Array)
 
+// StackTraceArrayHeader is the header prefixed to the byte-array storage that backs a managed
+// exception's _stackTrace. It is followed in memory by a contiguous array of StackTraceElement.
+CDAC_TYPE_BEGIN(StackTraceArrayHeader)
+CDAC_TYPE_SIZE(cdac_data<StackTraceArray>::HeaderSize)
+CDAC_TYPE_FIELD(StackTraceArrayHeader, T_UINT32, Size, cdac_data<StackTraceArray>::Size)
+CDAC_TYPE_FIELD(StackTraceArrayHeader, T_UINT32, KeepAliveItemsCount, cdac_data<StackTraceArray>::KeepAliveItemsCount)
+CDAC_TYPE_FIELD(StackTraceArrayHeader, T_POINTER, Thread, cdac_data<StackTraceArray>::Thread)
+CDAC_TYPE_END(StackTraceArrayHeader)
+
+CDAC_TYPE_BEGIN(StackTraceElement)
+CDAC_TYPE_SIZE(sizeof(StackTraceElement))
+CDAC_TYPE_FIELD(StackTraceElement, T_POINTER, IP, cdac_data<StackTraceElement>::IP)
+CDAC_TYPE_FIELD(StackTraceElement, T_POINTER, SP, cdac_data<StackTraceElement>::SP)
+CDAC_TYPE_FIELD(StackTraceElement, T_POINTER, pFunc, cdac_data<StackTraceElement>::pFunc)
+CDAC_TYPE_FIELD(StackTraceElement, T_INT32, Flags, cdac_data<StackTraceElement>::Flags)
+CDAC_TYPE_END(StackTraceElement)
+
 CDAC_TYPE_BEGIN(InteropSyncBlockInfo)
 CDAC_TYPE_INDETERMINATE(InteropSyncBlockInfo)
 #ifdef FEATURE_COMINTEROP

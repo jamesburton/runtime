@@ -289,7 +289,7 @@ public:
 
     HRESULT STDMETHODCALLTYPE IsExceptionObject(VMPTR_Object vmObject, OUT BOOL * pResult);
 
-    HRESULT STDMETHODCALLTYPE GetStackFramesFromException(VMPTR_Object vmObject, DacDbiArrayList<DacExceptionCallStackData>* pDacStackFrames);
+    HRESULT STDMETHODCALLTYPE EnumerateStackFramesFromException(VMPTR_Object vmObject, FP_EXCEPTIONSTACKFRAME_CALLBACK fpCallback, CALLBACK_DATA pUserData);
 
     // Returns true if the argument is a runtime callable wrapper
     HRESULT STDMETHODCALLTYPE IsRcw(VMPTR_Object vmObject, OUT BOOL * pResult);

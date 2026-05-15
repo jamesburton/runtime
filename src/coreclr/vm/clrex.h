@@ -20,6 +20,8 @@ class BaseBind;
 class AssemblySpec;
 class PEAssembly;
 
+template<typename T> struct cdac_data;
+
 enum StackTraceElementFlags
 {
     // Set if this element represents the last frame of the foreign exception stack trace
@@ -53,6 +55,15 @@ struct StackTraceElement
     {
         return !(*this == rhs);
     }
+};
+
+template<>
+struct cdac_data<StackTraceElement>
+{
+    static constexpr size_t IP = offsetof(StackTraceElement, ip);
+    static constexpr size_t SP = offsetof(StackTraceElement, sp);
+    static constexpr size_t pFunc = offsetof(StackTraceElement, pFunc);
+    static constexpr size_t Flags = offsetof(StackTraceElement, flags);
 };
 
 class StackTraceInfo
