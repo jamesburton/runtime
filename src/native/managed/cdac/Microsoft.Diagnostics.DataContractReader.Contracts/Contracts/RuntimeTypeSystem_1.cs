@@ -1356,7 +1356,7 @@ internal partial struct RuntimeTypeSystem_1 : IRuntimeTypeSystem
     {
         MethodDesc methodDesc = _methodDescs[methodDescHandle.Address];
 
-        // RequiresInstArg = IsSharedByGenericInstantiations && (HasMethodInstantiation || IsStatic || IsValueType || IsInterface)
+        // RequiresInstArg = IsSharedByGenericInstantiations && (HasMethodInstantiation || IsStatic || IsValueType || (IsInterface && !IsAbstract))
         if (!IsSharedByGenericInstantiations(methodDesc))
             return false;
 
@@ -1367,13 +1367,32 @@ internal partial struct RuntimeTypeSystem_1 : IRuntimeTypeSystem
             return true;
 
         MethodTable mt = _methodTables[methodDesc.MethodTable];
-        if (mt.Flags.IsInterface)
-            return true;
-
         if (mt.Flags.IsValueType)
             return true;
 
+        if (mt.Flags.IsInterface && !IsAbstract(methodDesc))
+            return true;
+
         return false;
+    }
+
+    private bool IsAbstract(MethodDesc methodDesc)
+    {
+        // Mirrors native MethodDesc::IsAbstract(), which checks IsMdAbstract(GetAttrs())
+        // on the method's metadata attributes.
+        uint token = methodDesc.Token;
+        if (EcmaMetadataUtils.GetRowId(token) == 0)
+            return false;
+
+        TargetPointer modulePtr = _methodTables[methodDesc.MethodTable].Module;
+        ModuleHandle moduleHandle = _target.Contracts.Loader.GetModuleHandleFromModulePtr(modulePtr);
+        MetadataReader? mdReader = _target.Contracts.EcmaMetadata.GetMetadata(moduleHandle);
+        if (mdReader is null)
+            return false;
+
+        MethodDefinitionHandle methodDefHandle = MetadataTokens.MethodDefinitionHandle((int)EcmaMetadataUtils.GetRowId(token));
+        MethodDefinition methodDef = mdReader.GetMethodDefinition(methodDefHandle);
+        return (methodDef.Attributes & MethodAttributes.Abstract) != 0;
     }
 
     private bool IsSharedByGenericInstantiations(MethodDesc methodDesc)

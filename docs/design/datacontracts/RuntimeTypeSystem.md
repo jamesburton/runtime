@@ -1644,7 +1644,7 @@ Determining if a method requires a hidden instantiation argument (generic contex
     {
         MethodDesc md = _methodDescs[methodDescHandle.Address];
 
-        // RequiresInstArg = IsSharedByGenericInstantiations && (HasMethodInstantiation || IsStatic || IsValueType || IsInterface)
+        // RequiresInstArg = IsSharedByGenericInstantiations && (HasMethodInstantiation || IsStatic || IsValueType || (IsInterface && !IsAbstract))
         if (!IsSharedByGenericInstantiations(md))
             return false;
 
@@ -1656,7 +1656,14 @@ Determining if a method requires a hidden instantiation argument (generic contex
             return true;
 
         MethodTable mt = _methodTables[md.MethodTable];
-        return mt.Flags.IsInterface || mt.Flags.IsValueType;
+        if (mt.Flags.IsValueType)
+            return true;
+
+        // For interface methods, abstract methods do not require an inst arg
+        // (they are never invoked directly); only non-abstract (default)
+        // interface methods do. IsAbstract is read from the method's
+        // metadata attributes (mdAbstract).
+        return mt.Flags.IsInterface && !IsAbstract(md);
     }
 
     private bool IsSharedByGenericInstantiations(MethodDesc md)
