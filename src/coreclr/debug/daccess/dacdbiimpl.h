@@ -883,8 +883,7 @@ private:
     BOOL UnwindRuntimeStackFrame(StackFrameIterator * pIter);
 
     // Look up the EnC version number of a particular jitted instance of a managed method.
-    void LookupEnCVersions(Module*          pModule,
-                           VMPTR_MethodDesc vmMethodDesc,
+    void LookupEnCVersions(VMPTR_MethodDesc vmMethodDesc,
                            mdMethodDef      mdMethod,
                            CORDB_ADDRESS    pNativeStartAddress,
                            SIZE_T *         pLatestEnCVersion,
