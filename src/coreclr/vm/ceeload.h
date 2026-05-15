@@ -1779,7 +1779,21 @@ struct cdac_data<Module>
     static constexpr size_t MethodDefToILCodeVersioningStateMap = offsetof(Module, m_ILCodeVersioningStateMap);
 #endif // FEATURE_CODE_VERSIONING
     static constexpr size_t DynamicILBlobTable = offsetof(Module, m_debuggerSpecificData.m_pDynamicILBlobTable);
+#ifdef FEATURE_METADATA_UPDATER
+    static constexpr size_t EnCDataList = offsetof(Module, m_pEnCDataList);
+#endif // FEATURE_METADATA_UPDATER
 };
+
+#ifdef FEATURE_METADATA_UPDATER
+template<>
+struct cdac_data<EnCData>
+{
+    static constexpr size_t AddrOfCode = offsetof(EnCData, addrOfCode);
+    static constexpr size_t Token = offsetof(EnCData, token);
+    static constexpr size_t EnCVersion = offsetof(EnCData, encVersion);
+    static constexpr size_t Next = offsetof(EnCData, pNext);
+};
+#endif // FEATURE_METADATA_UPDATER
 
 //
 // A ReflectionModule is a module created by reflection

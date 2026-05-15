@@ -37,6 +37,10 @@ internal sealed class Module : IData<Module>
         TypeRefToMethodTableMap = address + (ulong)type.Fields[nameof(TypeRefToMethodTableMap)].Offset;
         MethodDefToILCodeVersioningStateMap = address + (ulong)type.Fields[nameof(MethodDefToILCodeVersioningStateMap)].Offset;
         DynamicILBlobTable = target.ReadPointerField(address, type, nameof(DynamicILBlobTable));
+
+        EnCDataList = type.Fields.ContainsKey(nameof(EnCDataList))
+            ? target.ReadPointerField(address, type, nameof(EnCDataList))
+            : TargetPointer.Null;
     }
 
     private readonly TargetPointer _address;
@@ -71,4 +75,8 @@ internal sealed class Module : IData<Module>
     public TargetPointer TypeRefToMethodTableMap { get; init; }
     public TargetPointer MethodDefToILCodeVersioningStateMap { get; init; }
     public TargetPointer DynamicILBlobTable { get; init; }
+
+    // Head of the singly linked list of EnCData entries for jitted EnC-versioned methods in this module.
+    // Null when FEATURE_METADATA_UPDATER is disabled or when no EnC instances have been jitted.
+    public TargetPointer EnCDataList { get; init; }
 }
