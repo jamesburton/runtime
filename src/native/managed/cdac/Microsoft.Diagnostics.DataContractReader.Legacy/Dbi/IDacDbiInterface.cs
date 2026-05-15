@@ -33,6 +33,25 @@ public struct DacDbiTargetBuffer
     public uint cbSize;
 }
 
+// Mirrors the native NativeCodeFunctionData class defined in
+// src/coreclr/debug/inc/dacdbistructures.h. Used as the OUT buffer for the
+// GetNativeCodeInfo and GetNativeCodeInfoForAddr DacDbi APIs.
+//
+// Layout (must match the native MSLAYOUT struct):
+//   TargetBuffer m_rgCodeRegions[2]  // kHot, kCold
+//   BOOL         isInstantiatedGeneric
+//   VMPTR<MethodDesc> vmNativeCodeMethodDescToken (TADDR-sized; host pointer-sized)
+//   SIZE_T       encVersion (host pointer-sized)
+[StructLayout(LayoutKind.Sequential)]
+public struct NativeCodeFunctionData
+{
+    public DacDbiTargetBuffer hotRegion;
+    public DacDbiTargetBuffer coldRegion;
+    public Interop.BOOL isInstantiatedGeneric;
+    public nuint vmNativeCodeMethodDescToken;
+    public nuint encVersion;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct DacDbiAssemblyInfo
 {
