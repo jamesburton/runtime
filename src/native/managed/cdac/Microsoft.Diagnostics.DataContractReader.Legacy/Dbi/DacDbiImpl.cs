@@ -19,6 +19,11 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
     private readonly Target _target;
     private readonly IDacDbiInterface? _legacy;
 
+    // Default EnC function version (matches CorDB_DEFAULT_ENC_FUNCTION_VERSION in
+    // src/coreclr/inc/cordbpriv.h). Methods that have never been EnC-edited - and
+    // targets built without FEATURE_METADATA_UPDATER - report this version.
+    private const ulong CorDB_DEFAULT_ENC_FUNCTION_VERSION = 1;
+
     // IStringHolder is a native C++ abstract class (not COM) with a single virtual method:
     //   virtual HRESULT AssignCopy(const WCHAR* psz) = 0;
     // The nint we receive is a pointer to the object, whose first field is the vtable pointer.
@@ -1275,11 +1280,272 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
     public int GetILCodeAndSig(ulong vmAssembly, uint functionToken, DacDbiTargetBuffer* pTargetBuffer, uint* pLocalSigToken)
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetILCodeAndSig(vmAssembly, functionToken, pTargetBuffer, pLocalSigToken) : HResults.E_NOTIMPL;
 
-    public int GetNativeCodeInfo(ulong vmAssembly, uint functionToken, nint pJitManagerList)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetNativeCodeInfo(vmAssembly, functionToken, pJitManagerList) : HResults.E_NOTIMPL;
+    // The third parameter is named pJitManagerList in the legacy interface but is
+    // actually a NativeCodeFunctionData* output buffer (see dacdbistructures.h).
+    public int GetNativeCodeInfo(ulong vmAssembly, uint functionToken, nint pCodeInfo)
+    {
+        if (pCodeInfo == 0)
+            return HResults.E_INVALIDARG;
+
+        NativeCodeFunctionData* pOut = (NativeCodeFunctionData*)pCodeInfo;
+        *pOut = default;
+        int hr = HResults.S_OK;
+        try
+        {
+            // Only mdtMethodDef tokens flow through the cDAC path. The legacy DAC also
+            // accepts mdtMemberRef tokens via FindLoadedMethodRefOrDef; that resolution is
+            // not currently available in cDAC, so fall through to legacy in those cases.
+            if ((functionToken & EcmaMetadataUtils.TokenTypeMask) != (uint)EcmaMetadataUtils.TokenType.mdtMethodDef)
+            {
+                if (LegacyFallbackHelper.CanFallback() && _legacy is not null)
+                    return _legacy.GetNativeCodeInfo(vmAssembly, functionToken, pCodeInfo);
+                return HResults.E_NOTIMPL;
+            }
+
+            Contracts.ILoader loader = _target.Contracts.Loader;
+            Contracts.IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
+
+            Contracts.ModuleHandle moduleHandle = loader.GetModuleHandleFromAssemblyPtr(new TargetPointer(vmAssembly));
+            Contracts.ModuleLookupTables tables = loader.GetLookupTables(moduleHandle);
+            TargetPointer mdAddr = loader.GetModuleLookupMapElement(tables.MethodDefToDesc, functionToken, out _);
+            if (mdAddr == TargetPointer.Null)
+            {
+                // Method has no MethodDesc yet (not loaded) - leave the output cleared, return S_OK,
+                // matching what the legacy code path does after FindLoadedMethodRefOrDef returns NULL.
+                return HResults.S_OK;
+            }
+
+            Contracts.MethodDescHandle md = rts.GetMethodDescHandle(mdAddr);
+
+            // The cDAC contract does not currently expose GetAsyncVariantNoCreate, which the
+            // legacy DAC uses to unwrap async thunk methods. Fall back to legacy in that case.
+            if (rts.IsAsyncThunkMethod(md))
+            {
+                if (LegacyFallbackHelper.CanFallback() && _legacy is not null)
+                    return _legacy.GetNativeCodeInfo(vmAssembly, functionToken, pCodeInfo);
+                return HResults.E_NOTIMPL;
+            }
+
+            pOut->vmNativeCodeMethodDescToken = (nuint)mdAddr.Value;
+
+            TargetCodePointer nativeCode = rts.GetNativeCode(md);
+            if (nativeCode.Value != 0)
+            {
+                FillRegionInfoAndGenericInstantiation(rts, md, nativeCode, pOut);
+
+                // Look up EnC version on the method desc's loader module.
+                TargetPointer loaderModule = GetLoaderModule(rts, md);
+                pOut->encVersion = (nuint)GetEnCVersionOrDefault(loaderModule, functionToken, nativeCode).Value;
+            }
+            else
+            {
+                // No native code - encVersion stays default (struct already cleared to 0).
+                // Legacy DAC reports CorDB_DEFAULT_ENC_FUNCTION_VERSION (1) for the no-code path.
+                pOut->encVersion = (nuint)CorDB_DEFAULT_ENC_FUNCTION_VERSION;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+#if DEBUG
+        if (_legacy is not null)
+        {
+            NativeCodeFunctionData dataLocal = default;
+            int hrLocal = _legacy.GetNativeCodeInfo(vmAssembly, functionToken, (nint)(&dataLocal));
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK)
+            {
+                AssertNativeCodeFunctionDataEqual(pOut, &dataLocal);
+            }
+        }
+#endif
+        return hr;
+    }
 
     public int GetNativeCodeInfoForAddr(ulong codeAddress, nint pCodeInfo, ulong* pVmModule, uint* pFunctionToken)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetNativeCodeInfoForAddr(codeAddress, pCodeInfo, pVmModule, pFunctionToken) : HResults.E_NOTIMPL;
+    {
+        if (pCodeInfo == 0)
+            return HResults.E_INVALIDARG;
+
+        NativeCodeFunctionData* pOut = (NativeCodeFunctionData*)pCodeInfo;
+        *pOut = default;
+        if (pVmModule != null)
+            *pVmModule = 0;
+        if (pFunctionToken != null)
+            *pFunctionToken = 0;
+
+        // codeAddress == 0 is not an error: clear output and report success
+        // (matches legacy DacDbiInterfaceImpl::GetNativeCodeInfoForAddr).
+        if (codeAddress == 0)
+            return HResults.S_OK;
+
+        int hr = HResults.S_OK;
+        try
+        {
+            Contracts.IExecutionManager em = _target.Contracts.ExecutionManager;
+            Contracts.IRuntimeTypeSystem rts = _target.Contracts.RuntimeTypeSystem;
+
+            Contracts.CodeBlockHandle? cbh = em.GetCodeBlockHandle(new TargetCodePointer(codeAddress));
+            if (cbh is null)
+            {
+                // The legacy code path also handles interpreter entry-point lookups
+                // (GetInterpreterCodeFromEntryPointIfPresent) and ARM thumb-bit stripping.
+                // These are not currently surfaced through the cDAC contracts, so when
+                // the cDAC ExecutionManager doesn't recognize the address, fall back to
+                // the legacy DAC implementation for compatibility.
+                if (LegacyFallbackHelper.CanFallback() && _legacy is not null)
+                    return _legacy.GetNativeCodeInfoForAddr(codeAddress, pCodeInfo, pVmModule, pFunctionToken);
+                return HResults.E_NOTIMPL;
+            }
+
+            TargetPointer mdAddr = em.GetMethodDesc(cbh.Value);
+            Debug.Assert(mdAddr != TargetPointer.Null, "GetCodeBlockHandle returned a handle but GetMethodDesc returned null.");
+
+            Contracts.MethodDescHandle md = rts.GetMethodDescHandle(mdAddr);
+            TargetCodePointer hotStart = new TargetCodePointer(em.GetStartAddress(cbh.Value).Value);
+
+            FillRegionInfoAndGenericInstantiation(rts, md, hotStart, pOut);
+            pOut->vmNativeCodeMethodDescToken = (nuint)mdAddr.Value;
+
+            uint methodToken = rts.GetMethodToken(md);
+
+            // Match legacy behavior: EnC version comes from the method desc's loader module.
+            TargetPointer loaderModule = GetLoaderModule(rts, md);
+            pOut->encVersion = (nuint)GetEnCVersionOrDefault(loaderModule, methodToken, hotStart).Value;
+
+            if (pVmModule != null || pFunctionToken != null)
+            {
+                if (pFunctionToken != null)
+                    *pFunctionToken = methodToken;
+
+                if (pVmModule != null)
+                {
+                    // pVmModule is the method's metadata module (MethodDesc::GetModule()),
+                    // which is the type's module, not necessarily the loader module.
+                    TargetPointer mt = rts.GetMethodTable(md);
+                    Contracts.TypeHandle th = rts.GetTypeHandle(mt);
+                    *pVmModule = rts.GetModule(th).Value;
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+#if DEBUG
+        if (_legacy is not null)
+        {
+            NativeCodeFunctionData dataLocal = default;
+            ulong moduleLocal = 0;
+            uint tokenLocal = 0;
+            int hrLocal = _legacy.GetNativeCodeInfoForAddr(
+                codeAddress,
+                (nint)(&dataLocal),
+                pVmModule != null ? &moduleLocal : null,
+                pFunctionToken != null ? &tokenLocal : null);
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK)
+            {
+                AssertNativeCodeFunctionDataEqual(pOut, &dataLocal);
+                if (pVmModule != null)
+                    Debug.Assert(*pVmModule == moduleLocal, $"pVmModule: cDAC: {*pVmModule:x}, DAC: {moduleLocal:x}");
+                if (pFunctionToken != null)
+                    Debug.Assert(*pFunctionToken == tokenLocal, $"pFunctionToken: cDAC: {*pFunctionToken:x}, DAC: {tokenLocal:x}");
+            }
+        }
+#endif
+        return hr;
+    }
+
+    // Helper: fill the hot/cold region info and the isInstantiatedGeneric flag.
+    // pOut->hotRegion.pAddress == 0 when the method has no jitted code; in that case
+    // the cold region and isInstantiatedGeneric remain zero (cleared on entry).
+    private void FillRegionInfoAndGenericInstantiation(
+        Contracts.IRuntimeTypeSystem rts,
+        Contracts.MethodDescHandle md,
+        TargetCodePointer hotStart,
+        NativeCodeFunctionData* pOut)
+    {
+        if (hotStart.Value == 0)
+            return;
+
+        Contracts.IExecutionManager em = _target.Contracts.ExecutionManager;
+
+        // Look up the code block to obtain hot region size and any cold region.
+        Contracts.CodeBlockHandle? cbh = em.GetCodeBlockHandle(hotStart);
+        uint hotSize = 0;
+        TargetPointer coldStart = TargetPointer.Null;
+        uint coldSize = 0;
+        if (cbh is not null)
+        {
+            em.GetMethodRegionInfo(cbh.Value, out hotSize, out coldStart, out coldSize);
+        }
+
+        pOut->hotRegion.pAddress = hotStart.Value;
+        pOut->hotRegion.cbSize = hotSize;
+        pOut->coldRegion.pAddress = coldStart.Value;
+        pOut->coldRegion.cbSize = coldSize;
+
+        // isInstantiatedGeneric mirrors MethodDesc::HasClassOrMethodInstantiation():
+        // either the owning type is instantiated, or the method has its own instantiation.
+        bool hasClassInst = false;
+        TargetPointer mt = rts.GetMethodTable(md);
+        if (mt != TargetPointer.Null)
+        {
+            Contracts.TypeHandle th = rts.GetTypeHandle(mt);
+            hasClassInst = rts.GetInstantiation(th).Length > 0;
+        }
+        bool hasMethodInst = rts.GetGenericMethodInstantiation(md).Length > 0;
+        pOut->isInstantiatedGeneric = (hasClassInst || hasMethodInst) ? Interop.BOOL.TRUE : Interop.BOOL.FALSE;
+    }
+
+    // Returns MethodDesc::GetLoaderModule(): the module that owns the loader heap
+    // for this method desc. For non-generic methods this equals the metadata
+    // module; for instantiations they may differ.
+    private static TargetPointer GetLoaderModule(Contracts.IRuntimeTypeSystem rts, Contracts.MethodDescHandle md)
+    {
+        TargetPointer mt = rts.GetMethodTable(md);
+        if (mt == TargetPointer.Null)
+            return TargetPointer.Null;
+        Contracts.TypeHandle th = rts.GetTypeHandle(mt);
+        return rts.GetLoaderModule(th);
+    }
+
+    // Returns the EnC version for (module, methodDef, nativeCodeAddress), or the
+    // default version (1) when the EnC contract is not registered (this happens
+    // when the target was built without FEATURE_METADATA_UPDATER).
+    private TargetNUInt GetEnCVersionOrDefault(TargetPointer module, uint methodDef, TargetCodePointer nativeCodeAddress)
+    {
+        if (module == TargetPointer.Null)
+            return new TargetNUInt(CorDB_DEFAULT_ENC_FUNCTION_VERSION);
+
+        if (_target.Contracts.TryGetContract<Contracts.IEnC>(out Contracts.IEnC enc))
+        {
+            return enc.GetEnCVersion(module, methodDef, nativeCodeAddress);
+        }
+        return new TargetNUInt(CorDB_DEFAULT_ENC_FUNCTION_VERSION);
+    }
+
+#if DEBUG
+    private static void AssertNativeCodeFunctionDataEqual(NativeCodeFunctionData* cdac, NativeCodeFunctionData* legacy)
+    {
+        Debug.Assert(cdac->hotRegion.pAddress == legacy->hotRegion.pAddress,
+            $"hotRegion.pAddress: cDAC: {cdac->hotRegion.pAddress:x}, DAC: {legacy->hotRegion.pAddress:x}");
+        Debug.Assert(cdac->hotRegion.cbSize == legacy->hotRegion.cbSize,
+            $"hotRegion.cbSize: cDAC: {cdac->hotRegion.cbSize}, DAC: {legacy->hotRegion.cbSize}");
+        Debug.Assert(cdac->coldRegion.pAddress == legacy->coldRegion.pAddress,
+            $"coldRegion.pAddress: cDAC: {cdac->coldRegion.pAddress:x}, DAC: {legacy->coldRegion.pAddress:x}");
+        Debug.Assert(cdac->coldRegion.cbSize == legacy->coldRegion.cbSize,
+            $"coldRegion.cbSize: cDAC: {cdac->coldRegion.cbSize}, DAC: {legacy->coldRegion.cbSize}");
+        Debug.Assert(cdac->isInstantiatedGeneric == legacy->isInstantiatedGeneric,
+            $"isInstantiatedGeneric: cDAC: {cdac->isInstantiatedGeneric}, DAC: {legacy->isInstantiatedGeneric}");
+        Debug.Assert(cdac->vmNativeCodeMethodDescToken == legacy->vmNativeCodeMethodDescToken,
+            $"vmNativeCodeMethodDescToken: cDAC: {cdac->vmNativeCodeMethodDescToken:x}, DAC: {legacy->vmNativeCodeMethodDescToken:x}");
+        Debug.Assert(cdac->encVersion == legacy->encVersion,
+            $"encVersion: cDAC: {cdac->encVersion}, DAC: {legacy->encVersion}");
+    }
+#endif
 
     public int IsValueType(ulong vmTypeHandle, Interop.BOOL* pResult)
     {
