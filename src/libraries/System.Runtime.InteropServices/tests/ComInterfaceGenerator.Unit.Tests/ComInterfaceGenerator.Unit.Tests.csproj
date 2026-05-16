@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
     <LangVersion>Preview</LangVersion>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <TestRunRequiresLiveRefPack>true</TestRunRequiresLiveRefPack>
     <StringResourcesPath>../../gen/Common/Resources/Strings.resx</StringResourcesPath>
     <!-- https://github.com/dotnet/runtime/issues/126862 -->
