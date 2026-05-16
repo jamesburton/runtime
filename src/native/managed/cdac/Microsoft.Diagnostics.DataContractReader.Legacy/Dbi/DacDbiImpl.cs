@@ -5,6 +5,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Microsoft.Diagnostics.DataContractReader.Contracts;
@@ -1352,7 +1355,104 @@ public sealed unsafe partial class DacDbiImpl : IDacDbiInterface
     }
 
     public int GetILCodeAndSig(ulong vmAssembly, uint functionToken, DacDbiTargetBuffer* pTargetBuffer, uint* pLocalSigToken)
-        => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetILCodeAndSig(vmAssembly, functionToken, pTargetBuffer, pLocalSigToken) : HResults.E_NOTIMPL;
+    {
+        const uint mdSignatureNil = 0x11000000;
+
+        *pTargetBuffer = default;
+        *pLocalSigToken = mdSignatureNil;
+        int hr = HResults.S_OK;
+        try
+        {
+            ILoader loader = _target.Contracts.Loader;
+            Contracts.ModuleHandle moduleHandle = loader.GetModuleHandleFromAssemblyPtr(new TargetPointer(vmAssembly));
+
+            MetadataReader mdReader = _target.Contracts.EcmaMetadata.GetMetadata(moduleHandle)
+                ?? throw new InvalidOperationException("Module has no metadata.");
+            MethodDefinitionHandle mdMethodHandle = MetadataTokens.MethodDefinitionHandle((int)(functionToken & 0x00FFFFFF));
+            MethodDefinition methodDef = mdReader.GetMethodDefinition(mdMethodHandle);
+
+            if ((methodDef.ImplAttributes & MethodImplAttributes.CodeTypeMask) == MethodImplAttributes.Native)
+                throw Marshal.GetExceptionForHR(CorDbgHResults.CORDBG_E_FUNCTION_NOT_IL)!;
+
+            TargetPointer headerPtr = loader.GetILHeader(moduleHandle, functionToken);
+            if (headerPtr == TargetPointer.Null)
+            {
+                if (methodDef.RelativeVirtualAddress == 0
+                    && (methodDef.ImplAttributes & MethodImplAttributes.CodeTypeMask) != MethodImplAttributes.IL)
+                {
+                    throw Marshal.GetExceptionForHR(CorDbgHResults.CORDBG_E_FUNCTION_NOT_IL)!;
+                }
+                return HResults.S_OK;
+            }
+
+            const byte ILFormatMask = 0x03;
+            const byte ILTinyFormat = 0x02;
+            const byte ILFatFormat = 0x03;
+            const byte ILMoreSects = 0x08;
+
+            byte firstByte = _target.Read<byte>(headerPtr.Value);
+            int headerSize;
+            int codeSize;
+            if ((firstByte & ILFormatMask) == ILTinyFormat)
+            {
+                headerSize = 1;
+                codeSize = firstByte >> 2;
+            }
+            else if ((firstByte & ILFormatMask) == ILFatFormat)
+            {
+                headerSize = 12;
+                codeSize = (int)_target.Read<uint>(headerPtr.Value + 4);
+            }
+            else
+            {
+                throw new BadImageFormatException("Invalid IL method header.");
+            }
+
+            byte[] body = new byte[headerSize + codeSize];
+            _target.ReadBuffer(headerPtr.Value, body);
+
+            // Mask out the MoreSects flag in the local copy so MethodBodyBlock.Create
+            // does not attempt to read exception-handling sections past the IL bytes.
+            if (headerSize == 12)
+                body[0] &= unchecked((byte)~ILMoreSects);
+
+            StandaloneSignatureHandle localSigHandle;
+            int ilLength;
+            fixed (byte* p = body)
+            {
+                BlobReader br = new BlobReader(p, body.Length);
+                MethodBodyBlock mb = MethodBodyBlock.Create(br);
+                localSigHandle = mb.LocalSignature;
+                ilLength = mb.GetILReader().Length;
+            }
+
+            pTargetBuffer->pAddress = headerPtr.Value + (ulong)headerSize;
+            pTargetBuffer->cbSize = (uint)ilLength;
+            *pLocalSigToken = localSigHandle.IsNil
+                ? mdSignatureNil
+                : (uint)MetadataTokens.GetToken(localSigHandle);
+        }
+        catch (System.Exception ex)
+        {
+            hr = ex.HResult;
+        }
+#if DEBUG
+        if (_legacy is not null)
+        {
+            DacDbiTargetBuffer bufferLocal = default;
+            uint sigLocal;
+            int hrLocal = _legacy.GetILCodeAndSig(vmAssembly, functionToken, &bufferLocal, &sigLocal);
+            Debug.ValidateHResult(hr, hrLocal);
+            if (hr == HResults.S_OK)
+            {
+                Debug.Assert(pTargetBuffer->pAddress == bufferLocal.pAddress, $"cDAC ILAddr: 0x{pTargetBuffer->pAddress:X}, DAC ILAddr: 0x{bufferLocal.pAddress:X}");
+                Debug.Assert(pTargetBuffer->cbSize == bufferLocal.cbSize, $"cDAC ILSize: {pTargetBuffer->cbSize}, DAC ILSize: {bufferLocal.cbSize}");
+                Debug.Assert(*pLocalSigToken == sigLocal, $"cDAC LocalSig: 0x{*pLocalSigToken:X}, DAC LocalSig: 0x{sigLocal:X}");
+            }
+        }
+#endif
+        return hr;
+    }
 
     public int GetNativeCodeInfo(ulong vmAssembly, uint functionToken, nint pJitManagerList)
         => LegacyFallbackHelper.CanFallback() && _legacy is not null ? _legacy.GetNativeCodeInfo(vmAssembly, functionToken, pJitManagerList) : HResults.E_NOTIMPL;
