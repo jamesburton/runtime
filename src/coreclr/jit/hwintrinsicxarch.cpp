@@ -156,6 +156,13 @@ static CORINFO_InstructionSet V512VersionOfIsa(CORINFO_InstructionSet isa)
             return InstructionSet_AVXVNNIINT_V512;
         }
 
+        case InstructionSet_AVXVNNI:
+        case InstructionSet_AVX512v3:
+        {
+            // AvxVnni.V512 lifts under AVX512v3 (which implies AVX-512-VNNI).
+            return InstructionSet_AVX512v3;
+        }
+
         default:
         {
             return InstructionSet_NONE;
