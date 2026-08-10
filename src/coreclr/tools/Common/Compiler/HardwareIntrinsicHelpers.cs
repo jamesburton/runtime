@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -238,6 +238,7 @@ namespace ILCompiler
             public const int SveAes = (1 << 13);
             public const int SveSha3 = (1 << 14);
             public const int SveSm4 = (1 << 15);
+            public const int Cssc = (1 << 16);
 
             public static void AddToBuilder(InstructionSetSupportBuilder builder, int flags)
             {
@@ -273,6 +274,8 @@ namespace ILCompiler
                     builder.AddSupportedInstructionSet("sve_sha3");
                 if ((flags & SveSm4) != 0)
                     builder.AddSupportedInstructionSet("sve_sm4");
+                if ((flags & Cssc) != 0)
+                    builder.AddSupportedInstructionSet("cssc");
             }
 
             public static int FromInstructionSet(InstructionSet instructionSet)
@@ -316,6 +319,7 @@ namespace ILCompiler
                     InstructionSet.ARM64_SveSha3_Arm64 => SveSha3,
                     InstructionSet.ARM64_SveSm4 => SveSm4,
                     InstructionSet.ARM64_SveSm4_Arm64 => SveSm4,
+                    InstructionSet.ARM64_Cssc => Cssc,
 
                     // Vector<T> Sizes
                     InstructionSet.ARM64_VectorT128 => 0,
@@ -331,6 +335,7 @@ namespace ILCompiler
             public const int Zba = (1 << 0);
             public const int Zbb = (1 << 1);
             public const int Zbs = (1 << 2);
+            public const int Zicond = (1 << 3);
 
             public static void AddToBuilder(InstructionSetSupportBuilder builder, int flags)
             {
@@ -340,6 +345,8 @@ namespace ILCompiler
                     builder.AddSupportedInstructionSet("zbb");
                 if ((flags & Zbs) != 0)
                     builder.AddSupportedInstructionSet("zbs");
+                if ((flags & Zicond) != 0)
+                    builder.AddSupportedInstructionSet("zicond");
             }
 
             public static int FromInstructionSet(InstructionSet instructionSet)
@@ -353,6 +360,7 @@ namespace ILCompiler
                     InstructionSet.RiscV64_Zba => Zba,
                     InstructionSet.RiscV64_Zbb => Zbb,
                     InstructionSet.RiscV64_Zbs => Zbs,
+                    InstructionSet.RiscV64_Zicond => Zicond,
 
                     _ => throw new NotSupportedException(((InstructionSet_RiscV64)instructionSet).ToString())
                 };
